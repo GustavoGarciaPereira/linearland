@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LinearLand — Aprenda Matrizes Jogando</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;700&family=DM+Mono:ital,wght@0,400;0,500;1,400&display=swap');
+
+:root {
+  --bg: #0d1117;
+  --panel-bg: #161b22;
+  --border: #21262d;
+  --accent: #58e06a;
+  --accent2: #f78166;
+  --accent3: #79c0ff;
+  --accent4: #ffa657;
+  --text: #cdd9e5;
+  --muted: #546e7a;
+  --grid-color: #161b22;
+  --sky: #0d2137;
+  --ground: #1a2e1a;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Mono', monospace;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── TOP BAR ── */
+#topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#topbar h1 {
+  font-family: 'Pixelify Sans', monospace;
+  font-size: 1.2rem;
+  color: var(--accent);
+  letter-spacing: 1px;
+}
+.level-tabs { display: flex; gap: 6px; }
+.level-tab {
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 1px;
+}
+.level-tab.active { border-color: var(--accent); color: var(--accent); background: rgba(88,224,106,0.08); }
+.level-tab.locked { opacity: 0.35; cursor: not-allowed; }
+#objective-bar {
+  font-size: 0.68rem;
+  color: var(--accent3);
+  max-width: 260px;
+  text-align: right;
+  line-height: 1.4;
+}
+
+/* ── MAIN LAYOUT ── */
+#main {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── GAME CANVAS ── */
+#gameWrap {
+  position: relative;
+  overflow: hidden;
+  background: var(--sky);
+}
+#gc { display: block; width: 100%; height: 100%; }
+
+/* ── CONTROLS HINT ── */
+#hint {
+  position: absolute;
+  bottom: 10px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; gap: 6px; align-items: center;
+  background: rgba(13,17,23,0.7);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-size: 0.6rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+.key {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border: 1px solid var(--muted);
+  border-radius: 3px;
+  font-size: 0.6rem; color: var(--text);
+  background: rgba(255,255,255,0.05);
+}
+
+/* ── LEVEL COMPLETE OVERLAY ── */
+#levelComplete {
+  display: none;
+  position: absolute; inset: 0;
+  background: rgba(13,17,23,0.85);
+  align-items: center; justify-content: center;
+  flex-direction: column; gap: 16px;
+  z-index: 10;
+}
+#levelComplete.show { display: flex; }
+#levelComplete h2 {
+  font-family: 'Pixelify Sans', monospace;
+  font-size: 2rem; color: var(--accent);
+  animation: pulse 0.5s ease infinite alternate;
+}
+@keyframes pulse { from { opacity:0.7; transform:scale(0.97); } to { opacity:1; transform:scale(1.03); } }
+#levelComplete p { font-size: 0.8rem; color: var(--text); text-align: center; max-width: 300px; line-height: 1.6; }
+#nextBtn {
+  padding: 10px 28px;
+  background: var(--accent);
+  color: #0d1117;
+  border: none; border-radius: 6px;
+  font-family: 'Pixelify Sans', monospace;
+  font-size: 1rem; cursor: pointer;
+  transition: transform 0.1s;
+}
+#nextBtn:hover { transform: scale(1.05); }
+
+/* ── RIGHT PANEL ── */
+#panel {
+  background: var(--panel-bg);
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+}
+
+.pcard {
+  border-bottom: 1px solid var(--border);
+  padding: 14px;
+}
+.pcard-title {
+  font-size: 0.6rem; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--muted);
+  margin-bottom: 10px;
+}
+
+/* Matrix */
+.mat-wrap {
+  display: flex; align-items: center;
+  justify-content: center; gap: 6px;
+}
+.mat-bracket { font-size: 3rem; color: var(--accent); font-weight: 100; line-height: 1; }
+.mat-inner {
+  display: grid;
+  grid-template-columns: repeat(3, 52px);
+  gap: 3px 0;
+  text-align: center;
+}
+.mc {
+  font-size: 0.78rem;
+  color: var(--accent);
+  padding: 2px 0;
+  transition: color 0.2s, background 0.15s;
+  border-radius: 3px;
+}
+.mc.zero { color: var(--muted); }
+.mc.flash { background: rgba(247,129,102,0.2); color: var(--accent2) !important; }
+
+/* Vectors */
+.vec-row {
+  display: flex; gap: 8px;
+  align-items: center; flex-wrap: wrap;
+  font-size: 0.72rem;
+}
+.vec-box {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  line-height: 1.7;
+  min-width: 80px;
+}
+.vec-box .lbl { font-size: 0.55rem; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+.vec-box .val { color: var(--accent3); }
+.arrow { color: var(--muted); font-size: 1rem; }
+
+/* Concept explainer */
+.concept {
+  font-size: 0.68rem;
+  line-height: 1.8;
+  color: var(--muted);
+}
+.concept .hi  { color: var(--accent); }
+.concept .hi2 { color: var(--accent2); }
+.concept .hi3 { color: var(--accent3); }
+.concept .hi4 { color: var(--accent4); }
+
+/* Object controls */
+.obj-ctrl { margin-top: 8px; }
+.ctrl-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 0.68rem; }
+.ctrl-row label { min-width: 70px; color: var(--muted); }
+input[type=range] {
+  -webkit-appearance: none; flex:1; height: 3px;
+  background: var(--border); border-radius: 2px; outline: none; cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px;
+  border-radius: 50%; cursor: pointer;
+  background: var(--accent2);
+  box-shadow: 0 0 6px rgba(247,129,102,0.5);
+}
+.ctrl-val { min-width: 36px; text-align: right; color: var(--accent2); font-size: 0.68rem; }
+
+/* Progress */
+.progress-row { display: flex; gap: 4px; align-items: center; font-size: 0.65rem; color: var(--muted); }
+.prog-bar { flex:1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.prog-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s; }
+
+/* Tag */
+.tag {
+  display: inline-block; padding: 1px 6px;
+  border-radius: 3px; font-size: 0.55rem;
+  font-weight: 700; letter-spacing: 1px;
+  text-transform: uppercase; margin-right: 3px;
+}
+.tag-t { background: rgba(88,224,106,0.12); color: var(--accent); }
+.tag-r { background: rgba(121,192,255,0.12); color: var(--accent3); }
+.tag-s { background: rgba(247,129,102,0.12); color: var(--accent2); }
+.tag-c { background: rgba(255,166,87,0.12); color: var(--accent4); }
+
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <h1>⬡ LinearLand</h1>
+  <div class="level-tabs">
+    <button class="level-tab active" id="tab0" onclick="goLevel(0)">N1 · Translação</button>
+    <button class="level-tab locked" id="tab1" onclick="goLevel(1)">N2 · Escala</button>
+    <button class="level-tab locked" id="tab2" onclick="goLevel(2)">N3 · Rotação</button>
+    <button class="level-tab locked" id="tab3" onclick="goLevel(3)">N4 · Composição</button>
+  </div>
+  <div id="objective-bar">Use ← → para mover, ↑ para pular</div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+  <div id="gameWrap">
+    <canvas id="gc"></canvas>
+    <div id="hint">
+      <span class="key">←</span><span class="key">→</span> mover &nbsp;
+      <span class="key">↑</span> pular &nbsp;
+      <span id="extraHint"></span>
+    </div>
+    <div id="levelComplete">
+      <h2 id="lcTitle">✓ Nível Completo!</h2>
+      <p id="lcText">Você usou translação para mover o personagem!</p>
+      <button id="nextBtn" onclick="nextLevel()">Próximo Nível →</button>
+    </div>
+  </div>
+
+  <div id="panel">
+    <!-- Matrix -->
+    <div class="pcard">
+      <div class="pcard-title">Matriz de Transformação</div>
+      <div class="mat-wrap">
+        <span class="mat-bracket">[</span>
+        <div class="mat-inner" id="matCells">
+          <div class="mc" id="c00">1.00</div><div class="mc" id="c01">0.00</div><div class="mc" id="c02">0.00</div>
+          <div class="mc" id="c10">0.00</div><div class="mc" id="c11">1.00</div><div class="mc" id="c12">0.00</div>
+          <div class="mc zero">0</div><div class="mc zero">0</div><div class="mc zero">1</div>
+        </div>
+        <span class="mat-bracket">]</span>
+      </div>
+    </div>
+
+    <!-- Vectors -->
+    <div class="pcard">
+      <div class="pcard-title">Vetores</div>
+      <div class="vec-row">
+        <div class="vec-box">
+          <div class="lbl">Posição</div>
+          <div class="val" id="vecPos">(0, 0)</div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="vec-box">
+          <div class="lbl">Velocidade</div>
+          <div class="val" id="vecVel">(0, 0)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Object controls (shown in levels 2+) -->
+    <div class="pcard" id="objCtrlCard" style="display:none">
+      <div class="pcard-title">Transformar Objeto Selecionado</div>
+      <div class="obj-ctrl" id="objCtrls"></div>
+    </div>
+
+    <!-- Concept -->
+    <div class="pcard">
+      <div class="pcard-title">O que está acontecendo</div>
+      <div class="concept" id="conceptText"></div>
+    </div>
+
+    <!-- Progress -->
+    <div class="pcard">
+      <div class="pcard-title">Progresso</div>
+      <div class="progress-row">
+        <span>Nível <span id="lvlNum">1</span></span>
+        <div class="prog-bar"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
+        <span id="progPct">0%</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  CANVAS SETUP
+// ═══════════════════════════════════════════════
+const canvas = document.getElementById('gc');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  const wrap = document.getElementById('gameWrap');
+  W = wrap.clientWidth; H = wrap.clientHeight;
+  canvas.width = W * devicePixelRatio;
+  canvas.height = H * devicePixelRatio;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+}
+resize();
+window.addEventListener('resize', () => { resize(); });
+
+// ═══════════════════════════════════════════════
+//  GAME STATE
+// ═══════════════════════════════════════════════
+let currentLevel = 0;
+let unlockedLevels = 0;
+let levelDone = false;
+
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+// Player
+const player = {
+  x: 80, y: 0,
+  vx: 0, vy: 0,
+  onGround: false,
+  facing: 1, // 1=right, -1=left
+  walkFrame: 0,
+  walkTimer: 0,
+};
+
+// Ground level (y increases downward, ground is near bottom)
+function groundY() { return H - 80; }
+
+// ═══════════════════════════════════════════════
+//  LEVEL DEFINITIONS
+// ═══════════════════════════════════════════════
+const levels = [
+  // ── LEVEL 1: Translation ──
+  {
+    name: 'Translação',
+    objective: 'Chegue à estrela! Use ← → para mover e ↑ para pular.',
+    concept: () => `<span class="tag tag-t">T</span> <span class="hi">Translação</span> = somar vetores.<br><br>
+Quando você pressiona <span class="hi">→</span>, o jogo faz:<br>
+<span class="hi">posição_nova = posição_atual + velocidade</span><br><br>
+Na matriz, os valores <span class="hi">tx</span> e <span class="hi">ty</span> na última coluna representam o deslocamento.`,
+    init(state) {
+      player.x = 80; player.y = groundY();
+      player.vx = 0; player.vy = 0;
+      state.star = { x: W - 100, y: groundY() - 20 };
+      state.platforms = [
+        { x: W/2 - 60, y: groundY() - 80, w: 120, h: 14 }
+      ];
+      state.objects = [];
+      state.selectedObj = null;
+    },
+    update(state, dt) {
+      // Star collection
+      const dx = player.x - state.star.x;
+      const dy = player.y - 20 - state.star.y;
+      if (Math.sqrt(dx*dx+dy*dy) < 30) return true;
+      return false;
+    },
+    draw(state) {
+      // Star
+      drawStar(state.star.x, state.star.y, 14, '#ffd700', '#fff8a0');
+      // Platforms
+      state.platforms.forEach(p => drawPlatform(p));
+      // Hint arrow
+      if (player.x < W/2) {
+        ctx.save();
+        ctx.globalAlpha = 0.4 + 0.2*Math.sin(Date.now()*0.004);
+        ctx.fillStyle = '#ffd700';
+        ctx.font = '20px serif';
+        ctx.fillText('→', state.star.x - 50, state.star.y - 10);
+        ctx.restore();
+      }
+    },
+    lcText: 'Você aplicou translação! Somar vetores move o personagem pelo espaço.',
+    extraHint: ''
+  },
+
+  // ── LEVEL 2: Scale ──
+  {
+    name: 'Escala',
+    objective: 'Encolha as caixas vermelhas para abrir passagem. Use Q/E para escalar o objeto selecionado.',
+    concept: () => `<span class="tag tag-s">S</span> <span class="hi2">Escala</span> = multiplicar por escalar.<br><br>
+Quando você escala um objeto por <span class="hi2">s</span>, cada ponto é multiplicado:<br>
+<span class="hi2">x_novo = s · x &nbsp;&nbsp; y_novo = s · y</span><br><br>
+Na matriz, os valores <span class="hi2">sx</span> e <span class="hi2">sy</span> ficam na diagonal principal.`,
+    init(state) {
+      player.x = 60; player.y = groundY();
+      player.vx = 0; player.vy = 0;
+      state.star = { x: W - 80, y: groundY() - 20 };
+      state.platforms = [];
+      state.objects = [
+        { x: W*0.35, y: groundY()-50, w: 60, h: 100, scale: 1.0, color: '#f78166', type:'box', label:'A' },
+        { x: W*0.6,  y: groundY()-50, w: 60, h: 100, scale: 1.0, color: '#f78166', type:'box', label:'B' },
+      ];
+      state.selectedObj = 0;
+    },
+    update(state, dt) {
+      // Scale with Q/E
+      const obj = state.objects[state.selectedObj];
+      if (obj) {
+        if (keys['q'] || keys['Q']) { obj.scale = Math.max(0.15, obj.scale - 0.015); }
+        if (keys['e'] || keys['E']) { obj.scale = Math.min(2.0, obj.scale + 0.015); }
+        if (keys['Tab']) { keys['Tab'] = false; state.selectedObj = (state.selectedObj+1)%state.objects.length; }
+      }
+      // Select by clicking
+      const dx = player.x - state.star.x;
+      const dy = player.y - 20 - state.star.y;
+      if (Math.sqrt(dx*dx+dy*dy) < 30) return true;
+      return false;
+    },
+    draw(state) {
+      state.objects.forEach((o,i) => {
+        const sw = o.w * o.scale;
+        const sh = o.h * o.scale;
+        const bx = o.x - sw/2, by = o.y + o.h/2 - sh;
+        ctx.save();
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = i===state.selectedObj ? '#ff9070' : o.color;
+        ctx.strokeStyle = i===state.selectedObj ? '#fff' : '#bb5544';
+        ctx.lineWidth = i===state.selectedObj ? 2 : 1;
+        ctx.fillRect(bx, by, sw, sh);
+        ctx.strokeRect(bx, by, sw, sh);
+        // Label
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 13px DM Mono';
+        ctx.textAlign = 'center';
+        ctx.fillText(o.label, o.x, by + sh/2 + 5);
+        // Scale indicator
+        ctx.font = '10px DM Mono';
+        ctx.fillStyle = i===state.selectedObj ? '#fff' : '#ffaa88';
+        ctx.fillText(`×${o.scale.toFixed(2)}`, o.x, by - 6);
+        ctx.restore();
+      });
+      drawStar(state.star.x, state.star.y, 14, '#ffd700', '#fff8a0');
+    },
+    getObjMatrix(state) {
+      const o = state.objects[state.selectedObj];
+      if (!o) return null;
+      return [[o.scale,0,0],[0,o.scale,0],[0,0,1]];
+    },
+    lcText: 'Você usou escala! Multiplicar a diagonal da matriz redimensiona o objeto.',
+    extraHint: '<span class="key">Q</span><span class="key">E</span> escalar objeto &nbsp; <span class="key">Tab</span> trocar objeto'
+  },
+
+  // ── LEVEL 3: Rotation ──
+  {
+    name: 'Rotação',
+    objective: 'Gire as plataformas para criar um caminho. Use Q/E para rotacionar o objeto selecionado.',
+    concept: () => `<span class="tag tag-r">R</span> <span class="hi3">Rotação</span> usa seno e cosseno.<br><br>
+Girar por ângulo <span class="hi3">θ</span> aplica:<br>
+<span class="hi3">x' = x·cos θ − y·sen θ</span><br>
+<span class="hi3">y' = x·sen θ + y·cos θ</span><br><br>
+Repare nos valores de cos/sen mudando na matriz ao girar!`,
+    init(state) {
+      player.x = 60; player.y = groundY();
+      player.vx = 0; player.vy = 0;
+      state.star = { x: W - 80, y: groundY() - 130 };
+      state.platforms = [];
+      state.objects = [
+        { x: W*0.3, y: groundY()-60, w: 130, h: 14, angle: 0, color: '#79c0ff', type:'plat', label:'A' },
+        { x: W*0.62, y: groundY()-130, w: 130, h: 14, angle: 0, color: '#79c0ff', type:'plat', label:'B' },
+      ];
+      state.selectedObj = 0;
+    },
+    update(state, dt) {
+      if (keys['q'] || keys['Q']) { state.objects[state.selectedObj].angle -= 0.025; }
+      if (keys['e'] || keys['E']) { state.objects[state.selectedObj].angle += 0.025; }
+      if (keys['Tab']) { keys['Tab'] = false; state.selectedObj = (state.selectedObj+1)%state.objects.length; }
+      const dx = player.x - state.star.x;
+      const dy = player.y - 20 - state.star.y;
+      if (Math.sqrt(dx*dx+dy*dy) < 30) return true;
+      return false;
+    },
+    draw(state) {
+      state.objects.forEach((o,i) => {
+        ctx.save();
+        ctx.translate(o.x, o.y);
+        ctx.rotate(o.angle);
+        ctx.fillStyle = i===state.selectedObj ? '#a8d8ff' : o.color;
+        ctx.strokeStyle = i===state.selectedObj ? '#fff' : '#5590bb';
+        ctx.lineWidth = i===state.selectedObj ? 2 : 1;
+        ctx.globalAlpha = 0.9;
+        ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
+        ctx.strokeRect(-o.w/2, -o.h/2, o.w, o.h);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 12px DM Mono';
+        ctx.textAlign = 'center';
+        ctx.fillText(o.label, 0, 4);
+        // Angle indicator
+        const deg = Math.round(o.angle * 180/Math.PI);
+        ctx.font = '10px DM Mono';
+        ctx.fillStyle = i===state.selectedObj ? '#fff' : '#aaccff';
+        ctx.fillText(`${deg}°`, 0, -o.h/2 - 6);
+        ctx.restore();
+      });
+      drawStar(state.star.x, state.star.y, 14, '#ffd700', '#fff8a0');
+    },
+    getObjMatrix(state) {
+      const o = state.objects[state.selectedObj];
+      if (!o) return null;
+      const c = Math.cos(o.angle), s = Math.sin(o.angle);
+      return [[c,-s,0],[s,c,0],[0,0,1]];
+    },
+    getRotatedPlatforms(state) {
+      return state.objects.map(o => ({ ...o }));
+    },
+    lcText: 'Você usou rotação! Seno e cosseno determinam como os pontos giram ao redor da origem.',
+    extraHint: '<span class="key">Q</span><span class="key">E</span> girar objeto &nbsp; <span class="key">Tab</span> trocar'
+  },
+
+  // ── LEVEL 4: Composition ──
+  {
+    name: 'Composição',
+    objective: 'Use todas as transformações para resolver o puzzle. Q/E girar, Z/X escalar, Tab trocar objeto.',
+    concept: () => `<span class="tag tag-c">C</span> <span class="hi4">Composição</span> = multiplicar matrizes.<br><br>
+Aplicar várias transformações juntas equivale a multiplicar as matrizes na ordem:<br>
+<span class="hi4">M = T · R · S</span><br><br>
+A ordem importa! Rotação depois de escala dá resultado diferente de escala depois de rotação.`,
+    init(state) {
+      player.x = 60; player.y = groundY();
+      player.vx = 0; player.vy = 0;
+      state.star = { x: W/2, y: groundY() - 200 };
+      state.platforms = [
+        { x: W*0.5 - 50, y: groundY() - 100, w: 100, h: 14 }
+      ];
+      state.objects = [
+        { x: W*0.25, y: groundY()-60, w: 110, h: 14, angle: 0, scale: 1.0, color: '#ffa657', type:'combo', label:'A' },
+        { x: W*0.75, y: groundY()-60, w: 110, h: 14, angle: 0, scale: 1.0, color: '#ffa657', type:'combo', label:'B' },
+      ];
+      state.selectedObj = 0;
+    },
+    update(state, dt) {
+      const o = state.objects[state.selectedObj];
+      if (keys['q'] || keys['Q']) o.angle -= 0.025;
+      if (keys['e'] || keys['E']) o.angle += 0.025;
+      if (keys['z'] || keys['Z']) o.scale = Math.max(0.2, o.scale - 0.015);
+      if (keys['x'] || keys['X']) o.scale = Math.min(2.5, o.scale + 0.015);
+      if (keys['Tab']) { keys['Tab'] = false; state.selectedObj = (state.selectedObj+1)%state.objects.length; }
+      const dx = player.x - state.star.x;
+      const dy = player.y - 20 - state.star.y;
+      if (Math.sqrt(dx*dx+dy*dy) < 30) return true;
+      return false;
+    },
+    draw(state) {
+      state.objects.forEach((o,i) => {
+        ctx.save();
+        ctx.translate(o.x, o.y);
+        ctx.rotate(o.angle);
+        ctx.scale(o.scale, o.scale);
+        ctx.fillStyle = i===state.selectedObj ? '#ffcc88' : o.color;
+        ctx.strokeStyle = i===state.selectedObj ? '#fff' : '#bb7733';
+        ctx.lineWidth = i===state.selectedObj ? 2/o.scale : 1/o.scale;
+        ctx.globalAlpha = 0.9;
+        ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
+        ctx.strokeRect(-o.w/2, -o.h/2, o.w, o.h);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${12/o.scale}px DM Mono`;
+        ctx.textAlign = 'center';
+        ctx.fillText(o.label, 0, 4/o.scale);
+        ctx.restore();
+        // Indicators outside transform
+        ctx.font = '10px DM Mono';
+        ctx.fillStyle = i===state.selectedObj ? '#fff' : '#ffcc88';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${Math.round(o.angle*180/Math.PI)}° ×${o.scale.toFixed(1)}`, o.x, o.y - o.h/2*o.scale - 8);
+      });
+      state.platforms.forEach(p => drawPlatform(p));
+      drawStar(state.star.x, state.star.y, 14, '#ffd700', '#fff8a0');
+    },
+    getObjMatrix(state) {
+      const o = state.objects[state.selectedObj];
+      if (!o) return null;
+      const c = Math.cos(o.angle)*o.scale, s = Math.sin(o.angle)*o.scale;
+      return [[c,-s,0],[s,c,0],[0,0,1]];
+    },
+    lcText: '🎉 Você completou todos os níveis! Translação, escala, rotação e composição — é assim que jogos reais funcionam!',
+    extraHint: '<span class="key">Q</span><span class="key">E</span> girar &nbsp;<span class="key">Z</span><span class="key">X</span> escalar &nbsp;<span class="key">Tab</span> trocar'
+  }
+];
+
+// ═══════════════════════════════════════════════
+//  PHYSICS & COLLISION
+// ═══════════════════════════════════════════════
+const GRAVITY = 900;
+const JUMP = -480;
+const SPEED = 220;
+
+function getPlatforms(state) {
+  const all = [...(state.platforms || [])];
+  // For levels with rotated objects, add them as collision platforms
+  if (state.objects) {
+    state.objects.forEach(o => {
+      if (o.type === 'plat' || o.type === 'combo') {
+        // Approximate rotated platform as a flat rect for simplicity
+        // Use the AABB of rotated rect
+        const c = Math.cos(o.angle||0), s = Math.sin(o.angle||0);
+        const hw = (o.w*(o.scale||1))/2, hh = (o.h*(o.scale||1))/2;
+        const corners = [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]];
+        const xs = corners.map(([cx,cy]) => o.x + cx*c - cy*s);
+        const ys = corners.map(([cx,cy]) => o.y + cx*s + cy*c);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        all.push({ x: minX, y: minY, w: maxX-minX, h: maxY-minY, isRotated: true });
+      }
+    });
+  }
+  return all;
+}
+
+function getBoxes(state) {
+  if (!state.objects) return [];
+  return state.objects.filter(o => o.type === 'box').map(o => {
+    const sw = o.w * o.scale;
+    const sh = o.h * o.scale;
+    return { x: o.x - sw/2, y: o.y + o.h/2 - sh, w: sw, h: sh };
+  });
+}
+
+function updatePlayer(dt, state) {
+  // Input
+  if (keys['ArrowLeft']  || keys['a'] || keys['A']) { player.vx = -SPEED; player.facing = -1; }
+  else if (keys['ArrowRight'] || keys['d'] || keys['D']) { player.vx = SPEED; player.facing = 1; }
+  else player.vx *= 0.7;
+
+  if ((keys['ArrowUp'] || keys['w'] || keys['W'] || keys[' ']) && player.onGround) {
+    player.vy = JUMP;
+    player.onGround = false;
+  }
+
+  // Gravity
+  player.vy += GRAVITY * dt;
+  player.x += player.vx * dt;
+  player.y += player.vy * dt;
+
+  // Walk animation
+  if (Math.abs(player.vx) > 10 && player.onGround) {
+    player.walkTimer += dt;
+    if (player.walkTimer > 0.12) { player.walkFrame = (player.walkFrame+1)%4; player.walkTimer=0; }
+  } else { player.walkFrame = 0; player.walkTimer = 0; }
+
+  player.onGround = false;
+
+  // Ground collision
+  if (player.y >= groundY()) {
+    player.y = groundY();
+    player.vy = 0;
+    player.onGround = true;
+  }
+
+  // Wall bounds
+  player.x = Math.max(20, Math.min(W-20, player.x));
+
+  // Platform collisions
+  const plats = getPlatforms(state);
+  plats.forEach(p => {
+    const foot = player.y;
+    const prevFoot = foot - player.vy * dt;
+    if (player.x + 10 > p.x && player.x - 10 < p.x + p.w) {
+      if (prevFoot <= p.y + 2 && foot >= p.y && player.vy >= 0) {
+        player.y = p.y;
+        player.vy = 0;
+        player.onGround = true;
+      }
+    }
+  });
+
+  // Box collisions (solid)
+  const boxes = getBoxes(state);
+  boxes.forEach(b => {
+    const foot = player.y;
+    if (player.x + 10 > b.x && player.x - 10 < b.x + b.w) {
+      if (foot > b.y && foot < b.y + b.h + 30 && player.vy >= 0) {
+        // From top
+        if (foot - player.vy*dt <= b.y + 4) {
+          player.y = b.y;
+          player.vy = 0;
+          player.onGround = true;
+        }
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  DRAWING
+// ═══════════════════════════════════════════════
+function drawBackground() {
+  // Sky gradient
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0, '#0d2137');
+  grad.addColorStop(1, '#0a1a0a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,W,H);
+
+  // Stars in sky
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  for (let i=0; i<40; i++) {
+    const sx = (i*137.5%1)*W;
+    const sy = (i*97.3%1)*(H*0.5);
+    const ss = i%3===0?1.5:0.8;
+    ctx.beginPath();
+    ctx.arc(sx,sy,ss,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  const gs = 40;
+  for (let x=0; x<W; x+=gs) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y=0; y<H; y+=gs) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // Ground
+  const gy = groundY();
+  const ggrad = ctx.createLinearGradient(0,gy,0,H);
+  ggrad.addColorStop(0,'#2a4a2a');
+  ggrad.addColorStop(0.1,'#1a3020');
+  ggrad.addColorStop(1,'#0d1a0d');
+  ctx.fillStyle = ggrad;
+  ctx.fillRect(0, gy, W, H-gy);
+  // Ground line
+  ctx.strokeStyle = '#3a7a3a';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(W,gy); ctx.stroke();
+}
+
+function drawPlatform(p) {
+  ctx.save();
+  const grd = ctx.createLinearGradient(p.x, p.y, p.x, p.y+p.h);
+  grd.addColorStop(0,'#4a7a4a');
+  grd.addColorStop(1,'#2a4a2a');
+  ctx.fillStyle = grd;
+  ctx.strokeStyle = '#5aaa5a';
+  ctx.lineWidth = 1;
+  ctx.fillRect(p.x, p.y, p.w, p.h);
+  ctx.strokeRect(p.x, p.y, p.w, p.h);
+  ctx.restore();
+}
+
+function drawStickFigure(x, y, facing, walkFrame, vx, vy) {
+  ctx.save();
+  ctx.translate(x, y);
+
+  const isWalking = Math.abs(vx) > 10;
+  const swing = isWalking ? Math.sin(walkFrame * Math.PI/2) * 0.4 : 0;
+
+  ctx.strokeStyle = '#e8e8e8';
+  ctx.lineWidth = 2.2;
+  ctx.lineCap = 'round';
+
+  // Body
+  ctx.beginPath(); ctx.moveTo(0,-38); ctx.lineTo(0,-18); ctx.stroke();
+
+  // Head
+  ctx.beginPath(); ctx.arc(0,-45,8,0,Math.PI*2);
+  ctx.fillStyle = '#e8e8e8'; ctx.fill(); ctx.stroke();
+
+  // Eyes (facing direction)
+  ctx.fillStyle = '#0d1117';
+  ctx.beginPath(); ctx.arc(2.5*facing,-46,1.5,0,Math.PI*2); ctx.fill();
+
+  // Arms
+  ctx.beginPath();
+  ctx.moveTo(0,-35);
+  ctx.lineTo(-14*facing - swing*8, -28 + Math.abs(swing)*4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0,-35);
+  ctx.lineTo(14*facing + swing*8, -28 + Math.abs(swing)*4);
+  ctx.stroke();
+
+  // Legs
+  ctx.beginPath();
+  ctx.moveTo(0,-18);
+  ctx.lineTo(-8 - swing*10, 0);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0,-18);
+  ctx.lineTo(8 + swing*10, 0);
+  ctx.stroke();
+
+  // Coordinate label
+  ctx.font = '9px DM Mono';
+  ctx.fillStyle = 'rgba(88,224,106,0.7)';
+  ctx.textAlign = 'center';
+  ctx.fillText(`(${Math.round(x)},${Math.round(H-y)})`, 0, 14);
+
+  ctx.restore();
+}
+
+function drawStar(x, y, r, color1, color2) {
+  const t = Date.now()*0.003;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(t);
+  ctx.shadowColor = color1;
+  ctx.shadowBlur = 15;
+  ctx.beginPath();
+  for (let i=0;i<10;i++) {
+    const a = (i*Math.PI/5) - Math.PI/2;
+    const rr = i%2===0 ? r : r*0.45;
+    i===0 ? ctx.moveTo(Math.cos(a)*rr, Math.sin(a)*rr) : ctx.lineTo(Math.cos(a)*rr, Math.sin(a)*rr);
+  }
+  ctx.closePath();
+  const grad = ctx.createRadialGradient(0,0,0,0,0,r);
+  grad.addColorStop(0, color2);
+  grad.addColorStop(1, color1);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════
+//  MATRIX PANEL UPDATE
+// ═══════════════════════════════════════════════
+let prevCells = Array(9).fill(null);
+
+function updateMatrix(M) {
+  const vals = [M[0][0],M[0][1],M[0][2], M[1][0],M[1][1],M[1][2], 0,0,1];
+  const ids = ['c00','c01','c02','c10','c11','c12'];
+  vals.slice(0,6).forEach((v,i) => {
+    const el = document.getElementById(ids[i]);
+    const str = v.toFixed(2);
+    if (str !== prevCells[i]) {
+      el.textContent = str;
+      el.classList.toggle('zero', Math.abs(v)<0.005 && !((i===0||i===4)));
+      el.classList.add('flash');
+      setTimeout(()=>el.classList.remove('flash'),250);
+      prevCells[i] = str;
+    }
+  });
+}
+
+function updateVectors() {
+  document.getElementById('vecPos').textContent =
+    `(${Math.round(player.x)}, ${Math.round(H - player.y)})`;
+  document.getElementById('vecVel').textContent =
+    `(${Math.round(player.vx)}, ${Math.round(-player.vy)})`;
+}
+
+// ═══════════════════════════════════════════════
+//  LEVEL MANAGEMENT
+// ═══════════════════════════════════════════════
+let state = {};
+
+function initLevel(n) {
+  levelDone = false;
+  document.getElementById('levelComplete').classList.remove('show');
+  state = {};
+  levels[n].init(state);
+  document.getElementById('conceptText').innerHTML = levels[n].concept();
+  document.getElementById('objective-bar').textContent = levels[n].objective;
+  document.getElementById('extraHint').innerHTML = levels[n].extraHint || '';
+  document.getElementById('lvlNum').textContent = n+1;
+
+  // Show/hide object controls
+  const card = document.getElementById('objCtrlCard');
+  const ctrls = document.getElementById('objCtrls');
+  if (n >= 1) {
+    card.style.display = 'block';
+    let html = '';
+    if (n === 1) {
+      html = `<div class="ctrl-row"><label><span class="tag tag-s">S</span> Escala</label>
+        <input type="range" id="sldScale" min="15" max="200" value="100"
+          oninput="applyScaleSlider(this.value)">
+        <span class="ctrl-val" id="sldScaleVal">1.00×</span></div>`;
+    } else if (n === 2) {
+      html = `<div class="ctrl-row"><label><span class="tag tag-r">R</span> Ângulo</label>
+        <input type="range" id="sldRot" min="-180" max="180" value="0"
+          oninput="applyRotSlider(this.value)">
+        <span class="ctrl-val" id="sldRotVal">0°</span></div>`;
+    } else {
+      html = `<div class="ctrl-row"><label><span class="tag tag-r">R</span> Ângulo</label>
+        <input type="range" id="sldRot4" min="-180" max="180" value="0"
+          oninput="applyRotSlider4(this.value)">
+        <span class="ctrl-val" id="sldRotVal4">0°</span></div>
+        <div class="ctrl-row"><label><span class="tag tag-s">S</span> Escala</label>
+        <input type="range" id="sldScale4" min="20" max="250" value="100"
+          oninput="applyScaleSlider4(this.value)">
+        <span class="ctrl-val" id="sldScaleVal4">1.00×</span></div>`;
+    }
+    ctrls.innerHTML = html;
+  } else {
+    card.style.display = 'none';
+  }
+}
+
+function applyScaleSlider(v) {
+  if (!state.objects) return;
+  state.objects[state.selectedObj].scale = v/100;
+  document.getElementById('sldScaleVal').textContent = (v/100).toFixed(2)+'×';
+}
+function applyRotSlider(v) {
+  if (!state.objects) return;
+  state.objects[state.selectedObj].angle = v*Math.PI/180;
+  document.getElementById('sldRotVal').textContent = v+'°';
+}
+function applyRotSlider4(v) {
+  if (!state.objects) return;
+  state.objects[state.selectedObj].angle = v*Math.PI/180;
+  document.getElementById('sldRotVal4').textContent = v+'°';
+}
+function applyScaleSlider4(v) {
+  if (!state.objects) return;
+  state.objects[state.selectedObj].scale = v/100;
+  document.getElementById('sldScaleVal4').textContent = (v/100).toFixed(2)+'×';
+}
+
+function goLevel(n) {
+  if (n > unlockedLevels) return;
+  currentLevel = n;
+  document.querySelectorAll('.level-tab').forEach((t,i)=>{
+    t.classList.toggle('active', i===n);
+  });
+  initLevel(n);
+}
+
+function nextLevel() {
+  const next = currentLevel + 1;
+  if (next >= levels.length) {
+    document.getElementById('lcTitle').textContent = '🏆 Parabéns!';
+    document.getElementById('nextBtn').style.display = 'none';
+    return;
+  }
+  unlockedLevels = Math.max(unlockedLevels, next);
+  document.getElementById('tab'+next).classList.remove('locked');
+  goLevel(next);
+}
+
+function completeLevel() {
+  if (levelDone) return;
+  levelDone = true;
+  document.getElementById('lcText').textContent = levels[currentLevel].lcText;
+  if (currentLevel === levels.length-1) {
+    document.getElementById('lcTitle').textContent = '🏆 Você venceu!';
+    document.getElementById('nextBtn').textContent = 'Reiniciar';
+    document.getElementById('nextBtn').onclick = () => { unlockedLevels=0; goLevel(0); ['tab1','tab2','tab3'].forEach(id=>document.getElementById(id).classList.add('locked')); };
+  } else {
+    document.getElementById('lcTitle').textContent = '✓ Nível Completo!';
+    document.getElementById('nextBtn').textContent = 'Próximo Nível →';
+    document.getElementById('nextBtn').onclick = nextLevel;
+  }
+  document.getElementById('levelComplete').classList.add('show');
+}
+
+// ═══════════════════════════════════════════════
+//  PLAYER MATRIX (translation)
+// ═══════════════════════════════════════════════
+function getPlayerMatrix() {
+  return [[1,0,player.x],[0,1,H-player.y],[0,0,1]];
+}
+
+// ═══════════════════════════════════════════════
+//  MAIN LOOP
+// ═══════════════════════════════════════════════
+let last = 0;
+function loop(ts) {
+  const dt = Math.min((ts - last)/1000, 0.05);
+  last = ts;
+
+  const lvl = levels[currentLevel];
+
+  updatePlayer(dt, state);
+
+  // Progress (distance to star)
+  if (state.star) {
+    const d = Math.sqrt((player.x-state.star.x)**2 + (player.y-20-state.star.y)**2);
+    const maxD = Math.sqrt(W*W+H*H);
+    const pct = Math.round(Math.max(0,Math.min(100,(1-d/maxD)*100)));
+    document.getElementById('progFill').style.width = pct+'%';
+    document.getElementById('progPct').textContent = pct+'%';
+  }
+
+  // Level update
+  if (!levelDone) {
+    const done = lvl.update(state, dt);
+    if (done) completeLevel();
+  }
+
+  // Matrix display
+  let M;
+  if (lvl.getObjMatrix && state.objects && state.objects.length) {
+    M = lvl.getObjMatrix(state);
+  } else {
+    M = getPlayerMatrix();
+  }
+  if (M) updateMatrix(M);
+  updateVectors();
+
+  // ── DRAW ──
+  ctx.clearRect(0,0,W,H);
+  drawBackground();
+  lvl.draw(state);
+  drawStickFigure(player.x, player.y, player.facing, player.walkFrame, player.vx, player.vy);
+
+  // Level 1: show translation vector arrow
+  if (currentLevel === 0 && (Math.abs(player.vx)>5 || Math.abs(player.vy)>5)) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(88,224,106,0.6)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4,4]);
+    ctx.beginPath();
+    ctx.moveTo(player.x, player.y-30);
+    ctx.lineTo(player.x + player.vx*0.12, player.y-30 + player.vy*0.05);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// ═══════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════
+initLevel(0);
+requestAnimationFrame(ts => { last = ts; loop(ts); });
+</script>
+</body>
+</html>

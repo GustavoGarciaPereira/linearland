@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Matrix Lab — Transformações Lineares</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --panel: #11111a;
+    --border: #1e1e2e;
+    --accent: #00ff9d;
+    --accent2: #ff6b35;
+    --accent3: #7b61ff;
+    --text: #e0e0f0;
+    --muted: #555577;
+    --grid: #1a1a2e;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Noise texture overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none; z-index: 1000; opacity: 0.4;
+  }
+
+  header {
+    padding: 24px 32px 0;
+    display: flex; align-items: baseline; gap: 16px;
+  }
+  header h1 {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800; font-size: 1.5rem;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+  }
+  header span {
+    font-size: 0.7rem; color: var(--muted);
+    letter-spacing: 2px; text-transform: uppercase;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 20px;
+    padding: 20px 32px 32px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  /* Canvas area */
+  .canvas-wrap {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+  }
+
+  /* Label floating on canvas */
+  .canvas-label {
+    position: absolute; top: 14px; left: 14px;
+    font-size: 0.65rem; letter-spacing: 2px;
+    color: var(--muted); text-transform: uppercase;
+  }
+
+  /* Right panel */
+  .sidebar {
+    display: flex; flex-direction: column; gap: 16px;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+  }
+  .card-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.7rem; font-weight: 700;
+    letter-spacing: 3px; text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  /* Matrix display */
+  .matrix-display {
+    display: flex; align-items: center; gap: 8px;
+    justify-content: center;
+  }
+  .matrix-bracket {
+    font-size: 2.5rem; color: var(--accent);
+    font-weight: 100; line-height: 1;
+  }
+  .matrix-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px 10px;
+    text-align: center;
+  }
+  .matrix-cell {
+    font-size: 0.85rem;
+    font-family: 'Space Mono', monospace;
+    color: var(--accent);
+    min-width: 44px;
+    transition: color 0.2s, transform 0.15s;
+  }
+  .matrix-cell.changed {
+    color: var(--accent2);
+    transform: scale(1.15);
+  }
+  .matrix-cell.zero { color: var(--muted); }
+
+  /* Controls */
+  .control-group { margin-bottom: 14px; }
+  .control-group:last-child { margin-bottom: 0; }
+
+  .ctrl-label {
+    display: flex; justify-content: space-between;
+    font-size: 0.7rem; margin-bottom: 6px;
+    color: var(--text);
+  }
+  .ctrl-label span { color: var(--accent2); font-weight: 700; }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%; height: 3px;
+    background: var(--border);
+    border-radius: 2px; outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    transition: transform 0.1s;
+    box-shadow: 0 0 8px rgba(0,255,157,0.5);
+  }
+  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.3); }
+  input[type=range].rot::-webkit-slider-thumb { background: var(--accent3); box-shadow: 0 0 8px rgba(123,97,255,0.5); }
+  input[type=range].scl::-webkit-slider-thumb { background: var(--accent2); box-shadow: 0 0 8px rgba(255,107,53,0.5); }
+
+  /* Equation */
+  .eq-display {
+    font-size: 0.72rem;
+    line-height: 1.9;
+    color: var(--muted);
+  }
+  .eq-display .hi { color: var(--accent); }
+  .eq-display .hi2 { color: var(--accent2); }
+  .eq-display .hi3 { color: var(--accent3); }
+
+  /* Buttons */
+  .btn-row { display: flex; gap: 8px; margin-top: 4px; }
+  button {
+    flex: 1; padding: 8px 4px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem; letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-transform: uppercase;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); background: rgba(0,255,157,0.05); }
+  button.active { border-color: var(--accent); color: var(--accent); background: rgba(0,255,157,0.08); }
+
+  /* Shape selector */
+  .shape-row { display: flex; gap: 8px; }
+  .shape-btn {
+    flex: 1; padding: 10px 4px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .shape-btn svg { display: block; margin: 0 auto 4px; }
+  .shape-btn.active { border-color: var(--accent3); color: var(--accent3); background: rgba(123,97,255,0.08); }
+  .shape-btn:hover:not(.active) { border-color: var(--muted); color: var(--text); }
+
+  /* Trail toggle */
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+  .toggle-label { font-size: 0.68rem; color: var(--muted); }
+  .toggle {
+    width: 36px; height: 18px;
+    background: var(--border);
+    border-radius: 9px;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.2s;
+  }
+  .toggle.on { background: rgba(0,255,157,0.3); border: 1px solid var(--accent); }
+  .toggle::after {
+    content: ''; position: absolute;
+    top: 2px; left: 2px;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: transform 0.2s, background 0.2s;
+  }
+  .toggle.on::after { transform: translateX(18px); background: var(--accent); }
+
+  .tag {
+    display: inline-block;
+    font-size: 0.55rem; letter-spacing: 1.5px;
+    padding: 2px 6px; border-radius: 3px;
+    text-transform: uppercase; font-weight: 700;
+    margin-right: 4px;
+  }
+  .tag-t { background: rgba(0,255,157,0.12); color: var(--accent); }
+  .tag-r { background: rgba(123,97,255,0.12); color: var(--accent3); }
+  .tag-s { background: rgba(255,107,53,0.12); color: var(--accent2); }
+
+  @media (max-width: 700px) {
+    .layout { grid-template-columns: 1fr; }
+    header { padding: 16px; }
+    .layout { padding: 12px 16px 24px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Matrix Lab</h1>
+  <span>Transformações Lineares Interativas</span>
+</header>
+
+<div class="layout">
+  <div class="canvas-wrap">
+    <span class="canvas-label">Espaço 2D</span>
+    <canvas id="cv"></canvas>
+  </div>
+
+  <div class="sidebar">
+
+    <!-- Matrix display -->
+    <div class="card">
+      <div class="card-title">Matriz de Transformação 3×3</div>
+      <div class="matrix-display">
+        <span class="matrix-bracket">[</span>
+        <div class="matrix-grid" id="matrixGrid">
+          <div class="matrix-cell" id="m00">1.00</div>
+          <div class="matrix-cell" id="m01">0.00</div>
+          <div class="matrix-cell" id="m02">0.00</div>
+          <div class="matrix-cell" id="m10">0.00</div>
+          <div class="matrix-cell" id="m11">1.00</div>
+          <div class="matrix-cell" id="m12">0.00</div>
+          <div class="matrix-cell zero" id="m20">0</div>
+          <div class="matrix-cell zero" id="m21">0</div>
+          <div class="matrix-cell zero" id="m22">1</div>
+        </div>
+        <span class="matrix-bracket">]</span>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="card">
+      <div class="card-title">Controles</div>
+
+      <div class="control-group">
+        <div class="ctrl-label"><span class="tag tag-t">T</span> Translação X <span id="txVal">0</span></div>
+        <input type="range" id="tx" min="-200" max="200" value="0">
+      </div>
+      <div class="control-group">
+        <div class="ctrl-label"><span class="tag tag-t">T</span> Translação Y <span id="tyVal">0</span></div>
+        <input type="range" id="ty" min="-200" max="200" value="0">
+      </div>
+      <div class="control-group">
+        <div class="ctrl-label"><span class="tag tag-r">R</span> Rotação <span id="rotVal">0°</span></div>
+        <input type="range" class="rot" id="rot" min="0" max="360" value="0">
+      </div>
+      <div class="control-group">
+        <div class="ctrl-label"><span class="tag tag-s">S</span> Escala <span id="scaleVal">1.0×</span></div>
+        <input type="range" class="scl" id="scl" min="20" max="300" value="100">
+      </div>
+
+      <div class="btn-row">
+        <button id="btnReset" onclick="resetAll()">↺ Reset</button>
+        <button id="btnAnimate" onclick="toggleAnim()">▶ Animar</button>
+      </div>
+
+      <div class="toggle-row">
+        <span class="toggle-label">Mostrar original</span>
+        <div class="toggle on" id="toggleGhost" onclick="toggleGhost()"></div>
+      </div>
+    </div>
+
+    <!-- Shape -->
+    <div class="card">
+      <div class="card-title">Forma</div>
+      <div class="shape-row">
+        <div class="shape-btn active" id="s0" onclick="setShape(0)">
+          <svg width="22" height="22" viewBox="0 0 22 22"><polygon points="11,2 20,20 2,20" fill="currentColor" opacity="0.6"/></svg>
+          Triângulo
+        </div>
+        <div class="shape-btn" id="s1" onclick="setShape(1)">
+          <svg width="22" height="22" viewBox="0 0 22 22"><rect x="2" y="2" width="18" height="18" fill="currentColor" opacity="0.6"/></svg>
+          Quadrado
+        </div>
+        <div class="shape-btn" id="s2" onclick="setShape(2)">
+          <svg width="22" height="22" viewBox="0 0 22 22"><polygon points="11,1 14,8 21,8 15,13 17,21 11,16 5,21 7,13 1,8 8,8" fill="currentColor" opacity="0.6"/></svg>
+          Estrela
+        </div>
+      </div>
+    </div>
+
+    <!-- Equation -->
+    <div class="card">
+      <div class="card-title">O que está acontecendo</div>
+      <div class="eq-display" id="eqText">
+        Mova os controles para ver como a <span class="hi">matriz</span> muda em tempo real.<br><br>
+        <span class="tag tag-t">T</span> Translação: soma vetores<br>
+        <span class="tag tag-r">R</span> Rotação: seno e cosseno<br>
+        <span class="tag tag-s">S</span> Escala: multiplica por escalar
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('cv');
+const ctx = canvas.getContext('2d');
+
+let tx = 0, ty = 0, rot = 0, scl = 1;
+let showGhost = true;
+let animating = false;
+let animT = 0;
+let currentShape = 0;
+
+// Shapes defined as unit polygons
+const shapes = [
+  // Triangle
+  [[-50,-40],[50,-40],[0,55]],
+  // Square
+  [[-45,-45],[45,-45],[45,45],[-45,45]],
+  // Star
+  Array.from({length:10},(_,i)=>{
+    const a = (i*Math.PI/5)-Math.PI/2;
+    const r = i%2===0?52:22;
+    return [Math.cos(a)*r, Math.sin(a)*r];
+  })
+];
+
+function resize() {
+  const s = canvas.offsetWidth;
+  canvas.width = s * devicePixelRatio;
+  canvas.height = s * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+}
+resize();
+window.addEventListener('resize', resize);
+
+function drawGrid(W, H) {
+  const cx = W/2, cy = H/2;
+  const step = 40;
+  ctx.strokeStyle = '#1a1a2e';
+  ctx.lineWidth = 1;
+  for (let x = cx % step; x < W; x += step) {
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+  }
+  for (let y = cy % step; y < H; y += step) {
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  }
+  // Axes
+  ctx.strokeStyle = '#2a2a4a';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(0,cy); ctx.lineTo(W,cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,H); ctx.stroke();
+  // Labels
+  ctx.fillStyle = '#333355';
+  ctx.font = '10px Space Mono';
+  ctx.fillText('x', W-12, cy-6);
+  ctx.fillText('y', cx+6, 12);
+  ctx.fillText('(0,0)', cx+4, cy-4);
+}
+
+function applyTransform(pts, tx, ty, rot, scl) {
+  const c = Math.cos(rot), s = Math.sin(rot);
+  return pts.map(([x, y]) => {
+    // Scale first
+    const xs = x * scl, ys = y * scl;
+    // Rotate
+    const xr = xs * c - ys * s;
+    const yr = xs * s + ys * c;
+    // Translate
+    return [xr + tx, yr + ty];
+  });
+}
+
+function drawShape(pts, color, alpha, fill=true) {
+  if (!pts.length) return;
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  pts.slice(1).forEach(([x,y]) => ctx.lineTo(x,y));
+  ctx.closePath();
+  if (fill) {
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function drawVertexCoords(pts, W, H) {
+  ctx.font = '10px Space Mono';
+  pts.forEach(([x,y], i) => {
+    const sx = x, sy = y;
+    // Convert to "math" coords relative to center
+    const mx = Math.round(x - W/2);
+    const my = -Math.round(y - H/2);
+    ctx.fillStyle = '#00ff9d';
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(sx-1, sy-1, 3, 3);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(0,255,157,0.8)';
+    ctx.fillText(`(${mx},${my})`, sx+5, sy-4);
+  });
+}
+
+let prevMatrix = null;
+
+function buildMatrix() {
+  const c = Math.cos(rot), s = Math.sin(rot);
+  return [
+    [scl*c, -scl*s, tx],
+    [scl*s,  scl*c, ty],
+    [0,      0,     1 ]
+  ];
+}
+
+function fmt(v) {
+  return v.toFixed(2);
+}
+
+function updateMatrixDisplay(M) {
+  const ids = [['m00','m01','m02'],['m10','m11','m12'],['m20','m21','m22']];
+  const vals = [
+    [M[0][0], M[0][1], M[0][2]],
+    [M[1][0], M[1][1], M[1][2]],
+    [0, 0, 1]
+  ];
+  ids.forEach((row, i) => row.forEach((id, j) => {
+    const el = document.getElementById(id);
+    const v = vals[i][j];
+    const str = i===2 ? String(v) : fmt(v);
+    const wasChanged = prevMatrix && Math.abs(v - prevMatrix[i][j]) > 0.001;
+    el.textContent = str;
+    el.classList.toggle('zero', Math.abs(v) < 0.005 && !(i===j && i<2));
+    el.classList.toggle('changed', wasChanged);
+    if (wasChanged) setTimeout(() => el.classList.remove('changed'), 300);
+  }));
+  prevMatrix = vals;
+}
+
+function updateEquation() {
+  const el = document.getElementById('eqText');
+  const deg = Math.round(rot * 180/Math.PI);
+  const c = Math.cos(rot).toFixed(2), s = Math.sin(rot).toFixed(2);
+
+  let parts = [];
+
+  if (Math.abs(tx) > 1 || Math.abs(ty) > 1) {
+    parts.push(`<span class="tag tag-t">T</span> Translação: posição <span class="hi">+(&nbsp;${Math.round(tx)},&nbsp;${Math.round(-ty)}&nbsp;)</span>`);
+  }
+  if (Math.abs(rot) > 0.01) {
+    parts.push(`<span class="tag tag-r">R</span> Rotação <span class="hi3">${deg}°</span> → cos=${c}, sen=${s}`);
+  }
+  if (Math.abs(scl - 1) > 0.01) {
+    parts.push(`<span class="tag tag-s">S</span> Escala <span class="hi2">${scl.toFixed(2)}×</span> → cada coordenada multiplicada`);
+  }
+  if (parts.length === 0) {
+    el.innerHTML = `Matriz <span class="hi">identidade</span> — nenhuma transformação aplicada.<br><br>Mova os sliders para ver a mágica acontecer!`;
+  } else {
+    el.innerHTML = parts.join('<br><br>') + `<br><br><span style="color:#555577;font-size:0.65rem">Tudo combinado numa única multiplicação de matriz!</span>`;
+  }
+}
+
+function render() {
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  ctx.clearRect(0, 0, W, H);
+
+  drawGrid(W, H);
+
+  const cx = W/2, cy = H/2;
+  const pts = shapes[currentShape];
+
+  // Ghost (original)
+  if (showGhost) {
+    const ghost = pts.map(([x,y]) => [x + cx, y + cy]);
+    drawShape(ghost, '#ffffff', 0.06, true);
+    drawShape(ghost, '#334', 0.3, false);
+  }
+
+  // Transformed
+  const transformed = applyTransform(pts, cx + tx, cy + ty, rot, scl);
+  drawShape(transformed, '#00ff9d', 0.15, true);
+  drawShape(transformed, '#00ff9d', 0.9, false);
+  drawVertexCoords(transformed, W, H);
+
+  // Center dot
+  ctx.beginPath();
+  ctx.arc(cx + tx, cy + ty, 4, 0, Math.PI*2);
+  ctx.fillStyle = '#00ff9d';
+  ctx.globalAlpha = 0.6;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  const M = buildMatrix();
+  updateMatrixDisplay(M);
+  updateEquation();
+}
+
+function tick() {
+  if (animating) {
+    animT += 0.015;
+    tx = Math.sin(animT) * 120;
+    ty = Math.cos(animT * 0.7) * 80;
+    rot = animT;
+    scl = 0.7 + Math.sin(animT * 1.3) * 0.4;
+
+    document.getElementById('tx').value = tx;
+    document.getElementById('ty').value = ty;
+    document.getElementById('rot').value = ((rot % (Math.PI*2)) * 180/Math.PI + 360) % 360;
+    document.getElementById('scl').value = scl * 100;
+
+    document.getElementById('txVal').textContent = Math.round(tx);
+    document.getElementById('tyVal').textContent = Math.round(ty);
+    document.getElementById('rotVal').textContent = Math.round(rot*180/Math.PI % 360) + '°';
+    document.getElementById('scaleVal').textContent = scl.toFixed(2) + '×';
+  }
+  render();
+  requestAnimationFrame(tick);
+}
+
+// Slider bindings
+document.getElementById('tx').addEventListener('input', e => {
+  tx = +e.target.value;
+  document.getElementById('txVal').textContent = Math.round(tx);
+});
+document.getElementById('ty').addEventListener('input', e => {
+  ty = +e.target.value;
+  document.getElementById('tyVal').textContent = Math.round(ty);
+});
+document.getElementById('rot').addEventListener('input', e => {
+  rot = (+e.target.value) * Math.PI / 180;
+  document.getElementById('rotVal').textContent = e.target.value + '°';
+});
+document.getElementById('scl').addEventListener('input', e => {
+  scl = +e.target.value / 100;
+  document.getElementById('scaleVal').textContent = scl.toFixed(2) + '×';
+});
+
+function resetAll() {
+  animating = false;
+  document.getElementById('btnAnimate').classList.remove('active');
+  document.getElementById('btnAnimate').textContent = '▶ Animar';
+  tx = ty = rot = 0; scl = 1;
+  ['tx','ty','rot'].forEach(id => document.getElementById(id).value = 0);
+  document.getElementById('scl').value = 100;
+  document.getElementById('txVal').textContent = '0';
+  document.getElementById('tyVal').textContent = '0';
+  document.getElementById('rotVal').textContent = '0°';
+  document.getElementById('scaleVal').textContent = '1.0×';
+}
+
+function toggleAnim() {
+  animating = !animating;
+  const btn = document.getElementById('btnAnimate');
+  btn.classList.toggle('active', animating);
+  btn.textContent = animating ? '⏸ Pausar' : '▶ Animar';
+  if (animating) animT = 0;
+}
+
+function toggleGhost() {
+  showGhost = !showGhost;
+  document.getElementById('toggleGhost').classList.toggle('on', showGhost);
+}
+
+function setShape(i) {
+  currentShape = i;
+  [0,1,2].forEach(j => document.getElementById('s'+j).classList.toggle('active', j===i));
+}
+
+tick();
+</script>
+</body>
+</html>
