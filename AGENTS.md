@@ -17,15 +17,16 @@ O projeto nasceu de uma conversa sobre como jogos de computador são essencialme
 
 ## Arquivos do projeto
 
+Este repositório contém **dois projetos independentes** — sem código, estilo ou assets compartilhados:
+
 ```
-index.html    → Jogo principal: boneco de palito + 4 níveis (arquivo principal)
-demo.html     → Demo v1: canvas com formas + sliders de T/R/S (sem personagem)
+index.html    → LinearLand: jogo educativo com boneco de palito + 4 níveis
+demo.html     → Matrix Lab: demo visual independente (formas + sliders T/R/S, sem personagem)
 README.md     → Descrição do repositório (quase vazio — pendente)
 ```
 
-Toda evolução do jogo deve acontecer em `index.html` ou em versões incrementais (`v2.html`, `v3.html`...).
-
-`demo.html` é independente: não compartilha código com o jogo principal e **não** deve ser usado como referência de estilo (usa paleta neon própria, fontes Space Mono/Syne e canvas quadrado com grid cartesiano).
+- **`index.html` (LinearLand)** é o projeto principal deste guia; sua evolução acontece nele ou em versões incrementais (`v2.html`, `v3.html`...).
+- **`demo.html` (Matrix Lab)** é um projeto separado, com identidade visual própria (paleta neon, fontes Space Mono/Syne, canvas quadrado com grid cartesiano). Mudanças em um arquivo **não** devem se propagar para o outro, e ele não é referência de estilo nem de código para o jogo.
 
 ---
 
@@ -42,13 +43,17 @@ O jogo é **um único arquivo HTML** com três seções:
 | Seção | Responsabilidade |
 |---|---|
 | Canvas setup | `resize()`, devicePixelRatio |
-| Game state | `currentLevel`, `unlockedLevels`, `levelDone`, `player`, `keys` |
-| Level definitions | Array `levels[]`: `{ name, objective, concept, init, update, draw, getObjMatrix, lcText, extraHint }` |
-| Physics | `updatePlayer(dt, state)`: gravidade (900), pulo (-480), velocidade (220), colisão AABB com chão/plataformas/caixas |
-| Drawing | `drawBackground()`, `drawPlatform()`, `drawStickFigure()`, `drawStar()` |
+| Game state | `levelDone`, `player` (com `scale`), `keys` |
+| World definitions | Array `worlds[]`: cada mundo tem `{ name, concept, phases[] }`; cada fase `{ name, objective, extraHint, init, update, draw, getObjMatrix?, lcText }` |
+| Physics | `updatePlayer(dt, state)`: gravidade (900), pulo (-480), velocidade (220), colisão AABB com chão/plataformas/caixas/paredes; largura e altura do jogador escalam com `player.scale` |
+| Drawing | `drawBackground()`, `drawPlatform()`, `drawStickFigure()` (escala), `drawStar()`, `drawStars()`, `drawBoxes()`, `drawPlats()`, `drawCombos()` |
 | Matrix panel | `updateMatrix(M)`, `updateVectors()` — flash nas células que mudam |
-| Level management | `initLevel()`, `goLevel()`, `nextLevel()`, `completeLevel()` |
-| Object sliders | `applyScaleSlider()`, `applyRotSlider()`, `applyRotSlider4()`, `applyScaleSlider4()` |
+| Audio | `ac()`, `beep()`, `sfxStar()`, `sfxWin()`, `sfxReset()`, `tfx()` — sons sintetizados (Web Audio, sem arquivos) |
+| Particles | `burst()`, `updateParticles()`, `drawParticles()` — partículas de coleta |
+| Progression | `progress[]` por mundo, persistido em localStorage (`linearland-progress`); estrelas coletadas por fase |
+| Phase management | `initPhase(w,p)`, `goWorld()`, `goPhase()`, `nextPhase()`, `completeLevel()`, `refreshTopbar()` |
+| Targets/selection | `state.targets[]` (objetos + `player`), `selTarget()`, `selObj()`, `Tab` alterna; `scaleTargetBy()`, `rotateTargetBy()` |
+| UI helpers | `buildControls()`, `syncSliders()`, `sliderRot()`, `sliderScale()` |
 | Main loop | `requestAnimationFrame` com `dt` em segundos (cap de 0.05s) |
 
 ### Sistema de coordenadas
@@ -56,20 +61,26 @@ O jogo é **um único arquivo HTML** com três seções:
 - Canvas: y cresce para **baixo** (padrão do canvas HTML)
 - Exibição para o usuário: y é invertido (`H - player.y`) para parecer coordenadas matemáticas normais
 - `groundY()` retorna `H - 80`
-- Matriz exibida no painel: níveis com objetos mostram a matriz do **objeto selecionado** (`getObjMatrix`); caso contrário, mostra a matriz do **jogador** (`getPlayerMatrix`, translação pura). Sempre 3×3 homogênea.
+- Matriz exibida no painel: se o alvo selecionado é o **player**, mostra a escala dele (`[[s,0,0],[0,s,0],[0,0,1]]`); se é um **objeto**, mostra a matriz do objeto; sem alvo, mostra a matriz de translação do jogador. Sempre 3×3 homogênea.
+- Estilos de objeto: `plat` (gira), `box` (escala; sólida), `wall` (fixa, sólida; `anchor:'center'` = centrada em y), `combo` (gira + escala)
 
 ---
 
-## Os 4 níveis e seus objetivos didáticos
+## Estrutura de gameplay: 4 mundos × fases
 
-| Nível | Conceito | Mecânica principal | Matriz exibida |
+Cada **mundo** ensina um conceito. Cada mundo tem **3-4 fases** com arco didático:
+**Descobrir** (mecânica nova sem falha possível) → **Praticar** (variações) → **Virar** (uso não óbvio) → **Testar** (desafio combinado).
+
+| Mundo | Fases | Conceito | Mecânicas nas fases |
 |---|---|---|---|
-| 1 — Translação | Somar vetores move objetos | WASD/setas para mover e pular | Matriz do personagem com `tx`, `ty` |
-| 2 — Escala | Multiplicar diagonal redimensiona | Q/E para encolher/crescer caixas, Tab troca objeto | Matriz do objeto: `[[s,0,0],[0,s,0],[0,0,1]]` |
-| 3 — Rotação | Seno e cosseno giram pontos | Q/E para girar plataformas, Tab troca objeto | Matriz de rotação com cos/sen |
-| 4 — Composição | Produto de matrizes combina tudo | Q/E girar + Z/X escalar, Tab troca objeto | Matriz composta R·S do objeto |
+| 1 — Translação | 4 | Somar vetores move objetos | Andar/pular; plataformas em escada; vãos |
+| 2 — Escala | 4 | Multiplicar diagonal redimensiona | Encolher caixas bloqueadoras; **encolher o próprio personagem** (Fenda); combinar |
+| 3 — Rotação | 3 | Seno e cosseno giram pontos | Girar plataformas até deitar; subir escada giratória |
+| 4 — Composição | 3 | Produto de matrizes combina tudo | Girar + esticar plataformas para atravessar pontes |
 
-**Regra de ouro:** cada nível deve ensinar **um conceito novo** por vez, construindo sobre o anterior. O objetivo é sempre alcançar a estrela; completar o nível desbloqueia o próximo (abas no topo).
+**Regra de ouro:** cada fase ensina **um** conceito novo; o objetivo típico é coletar **todas as estrelas** da fase. Fases do mesmo mundo desbloqueiam em sequência; mundos desbloqueiam ao completar o anterior. Progresso salvo em localStorage.
+
+**Controles:** ← → mover · ↑ pular · Q/E transformar alvo selecionado (escala no M2, rotação no M3, rotação no M4) · Z/X escalar no M4 · Tab troca alvo (objetos + "você"). Sliders no painel direito refletem o alvo selecionado.
 
 ---
 
@@ -93,12 +104,12 @@ O jogo é **um único arquivo HTML** com três seções:
 
 - Manter tudo em **arquivo único** (HTML/CSS/JS inline) — sem dependências externas além das fontes Google Fonts
 - Usar `requestAnimationFrame` com `dt` para física independente de framerate
-- Exibir sempre a **matriz 3×3 homogênea** no painel direito, mesmo que o nível use só 2×2
+- Exibir sempre a **matriz 3×3 homogênea** no painel direito, mesmo que a fase use só 2×2
 - Fazer o painel direito atualizar em **tempo real** a cada frame
 - Adicionar **feedback visual** claro quando o usuário interage (flash, glow, animação)
 - Comentar seções novas com `// ── NOME DA SEÇÃO ──` e blocos com `// ═══ ... ═══`
 - Preservar o **boneco de palito** como personagem principal — ele é central para a identidade do projeto
-- Ao adicionar novos níveis, seguir a estrutura do array `levels[]`
+- Ao adicionar novos mundos/fases, seguir a estrutura `worlds[]` e o arco Descobrir→Praticar→Virar→Testar
 
 ### O que NÃO FAZER
 
@@ -107,16 +118,24 @@ O jogo é **um único arquivo HTML** com três seções:
 - Não remover a exibição da matriz — é o elemento didático central
 - Não tornar o jogo difícil demais: o objetivo é **aprender**, não frustrar
 - Não usar física complexa: o modelo atual (gravidade simples + AABB) é proposital
-- Não quebrar o sistema de níveis progressivos — cada nível deve ser desbloqueado em sequência
+- Não quebrar o sistema de progressão — fases/mundos desbloqueiam em sequência
 - Não alterar as variáveis CSS de cor sem manter coerência com os conceitos matemáticos (verde=translação, etc.)
 
 ### Gotchas conhecidos
 
-- `Tab` é interceptado como tecla de jogo (troca objeto selecionado); o `keydown` faz `preventDefault` em todas as teclas
+- `Tab` é interceptado como tecla de jogo (troca alvo selecionado); o `keydown` faz `preventDefault` em todas as teclas
+- `Esc` alterna pause; `R` reinicia a fase — ambos ignorados quando a fase já foi completada
+- Física congela quando `levelDone || paused` (o overlay/prévia não movimenta mais o boneco)
+- Teclas são limpas no `blur` da janela (evita boneco "andando sozinho" após Alt+Tab)
+- Áudio: Web Audio API gera os sons sintetizados (sem arquivos); contexto criado sob demanda e retomado se suspenso; `tfx()` faz throttle do som de transformação
+- Partículas vivem no array `particles`, atualizadas a cada frame e desenhadas por cima da cena
 - Colisão com plataformas rotacionadas usa o **AABB aproximado** do retângulo girado (`getPlatforms`) — simplificação intencional
-- `getBoxes` (nível 2) só resolve colisão **por cima** das caixas — não há colisão lateral
+- `getBoxes`: caixas/paredes bloqueiam lateralmente; caixas com topo ≤ `STEP_OVER` (36px) podem ser pisadas
+- Fases de rotação/composição: plataformas começam verticais — girar muda a altura do topo do AABB; escalar estica o alcance (mínimo ~1.6× para o salto da “Ponte dupla”)
+- `player.scale` (0.5–1.5) altera a largura/altura de colisão do boneco e o desenho; usado nas fases "Fenda" e "Caminho apertado"
 - Fricção horizontal (`player.vx *= 0.7` por frame) não usa `dt` — pequena dependência de framerate
-- Abas de nível travadas (`locked`) ignoram cliques: `goLevel` retorna cedo se `n > unlockedLevels`
+- Resize da janela **reinicia a fase atual** preservando as estrelas já coletadas
+- Fases/chips travados ignoram cliques: `goPhase` retorna cedo se `i > progress[w]`
 
 ---
 
@@ -124,14 +143,14 @@ O jogo é **um único arquivo HTML** com três seções:
 
 Prioridade sugerida:
 
-- [ ] **Nível 5 — Reflexão:** espelhar objetos com matriz `[[-1,0],[0,1]]`, personagem atravessa espelho
-- [ ] **Tooltips educativos:** hover em cada célula da matriz explica o que aquele valor representa
 - [ ] **Modo Quiz:** o aluno digita os valores da matriz e vê o resultado aplicado
+- [ ] **Tooltips educativos:** hover em cada célula da matriz explica o que aquele valor representa
+- [ ] **Destaque vivo:** ressaltar no painel quais células a tecla atual está alterando
+- [ ] **Tela de conceito do mundo** ao desbloquear um mundo novo
+- [ ] **Menu inicial / mapa de mundos** com estrelas por fase
+- [ ] **Mundo 5 — Reflexão:** espelhar objetos com matriz `[[-1,0],[0,1]]`, personagem atravessa espelho
 - [ ] **Histórico de transformações:** mostrar as últimas N matrizes aplicadas em cadeia
 - [ ] **Modo professor:** pause o jogo e mostre derivação da fórmula passo a passo
-- [ ] **Efeitos de partícula** quando o personagem coleta a estrela
-- [ ] **Música/sons** sutis (Web Audio API) sincronizados com transformações
-- [ ] **Salvamento de progresso** via localStorage
 - [ ] **Mobile touch controls** para funcionar em tablets em sala de aula
 - [ ] **Preencher README.md** com descrição real do projeto
 

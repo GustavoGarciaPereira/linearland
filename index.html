@@ -74,6 +74,30 @@ body {
   line-height: 1.4;
 }
 
+/* ── SUBBAR: FASES ── */
+#subbar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.phase-chips { display: flex; gap: 6px; }
+.phase-chip {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.62rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.phase-chip.done { border-color: rgba(88,224,106,0.5); color: var(--accent); background: rgba(88,224,106,0.08); }
+.phase-chip.active { border-color: var(--accent3); color: var(--accent3); background: rgba(121,192,255,0.1); box-shadow: 0 0 8px rgba(121,192,255,0.25); }
+.phase-chip.locked { opacity: 0.3; cursor: not-allowed; }
+
 /* ── MAIN LAYOUT ── */
 #main {
   display: grid;
@@ -249,13 +273,13 @@ input[type=range]::-webkit-slider-thumb {
 <!-- TOP BAR -->
 <div id="topbar">
   <h1>⬡ LinearLand</h1>
-  <div class="level-tabs">
-    <button class="level-tab active" id="tab0" onclick="goLevel(0)">N1 · Translação</button>
-    <button class="level-tab locked" id="tab1" onclick="goLevel(1)">N2 · Escala</button>
-    <button class="level-tab locked" id="tab2" onclick="goLevel(2)">N3 · Rotação</button>
-    <button class="level-tab locked" id="tab3" onclick="goLevel(3)">N4 · Composição</button>
-  </div>
+  <div class="level-tabs" id="worldTabs"></div>
   <div id="objective-bar">Use ← → para mover, ↑ para pular</div>
+</div>
+
+<!-- SUBBAR: fases do mundo atual -->
+<div id="subbar">
+  <div class="phase-chips" id="phaseChips"></div>
 </div>
 
 <!-- MAIN -->
@@ -265,12 +289,14 @@ input[type=range]::-webkit-slider-thumb {
     <div id="hint">
       <span class="key">←</span><span class="key">→</span> mover &nbsp;
       <span class="key">↑</span> pular &nbsp;
+      <span class="key">Esc</span> pausa &nbsp;
+      <span class="key">R</span> reiniciar &nbsp;
       <span id="extraHint"></span>
     </div>
     <div id="levelComplete">
-      <h2 id="lcTitle">✓ Nível Completo!</h2>
-      <p id="lcText">Você usou translação para mover o personagem!</p>
-      <button id="nextBtn" onclick="nextLevel()">Próximo Nível →</button>
+      <h2 id="lcTitle">✓ Fase Completa!</h2>
+      <p id="lcText">Continue jogando para dominar as transformações!</p>
+      <button id="nextBtn" onclick="nextPhase()">Próxima Fase →</button>
     </div>
   </div>
 
@@ -321,7 +347,7 @@ input[type=range]::-webkit-slider-thumb {
     <div class="pcard">
       <div class="pcard-title">Progresso</div>
       <div class="progress-row">
-        <span>Nível <span id="lvlNum">1</span></span>
+        <span>Fase <span id="lvlNum">1-1</span></span>
         <div class="prog-bar"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
         <span id="progPct">0%</span>
       </div>
@@ -347,27 +373,40 @@ function resize() {
   ctx.scale(devicePixelRatio, devicePixelRatio);
 }
 resize();
-window.addEventListener('resize', () => { resize(); });
+window.addEventListener('resize', () => {
+  // preserva o progresso da fase (estrelas coletadas) ao redimensionar
+  const gotStates = (state.stars || []).map(s => s.got);
+  const wasDone = levelDone;
+  resize();
+  initPhase(cur.w, cur.p);
+  (state.stars || []).forEach((s, i) => { if (gotStates[i]) s.got = true; });
+  if (wasDone) { levelDone = true; document.getElementById('levelComplete').classList.add('show'); }
+});
 
 // ═══════════════════════════════════════════════
 //  GAME STATE
 // ═══════════════════════════════════════════════
-let currentLevel = 0;
-let unlockedLevels = 0;
 let levelDone = false;
+let paused = false;
+let transformsUsed = 0;
 
 const keys = {};
 window.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !e.repeat) togglePause();
+  if ((e.key === 'r' || e.key === 'R') && !e.repeat) restartCurrentPhase();
+  if (!e.repeat && /^[qezx]$/i.test(e.key)) transformsUsed++;
   keys[e.key] = true;
   e.preventDefault();
 });
 window.addEventListener('keyup', e => { keys[e.key] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
 // Player
 const player = {
   x: 80, y: 0,
   vx: 0, vy: 0,
   onGround: false,
+  scale: 1,
   facing: 1, // 1=right, -1=left
   walkFrame: 0,
   walkTimer: 0,
@@ -379,263 +418,424 @@ function groundY() { return H - 80; }
 // ═══════════════════════════════════════════════
 //  LEVEL DEFINITIONS
 // ═══════════════════════════════════════════════
-const levels = [
-  // ── LEVEL 1: Translation ──
+const worlds = [
+  // ══ MUNDO 1 · TRANSLAÇÃO ══
   {
     name: 'Translação',
-    objective: 'Chegue à estrela! Use ← → para mover e ↑ para pular.',
     concept: () => `<span class="tag tag-t">T</span> <span class="hi">Translação</span> = somar vetores.<br><br>
-Quando você pressiona <span class="hi">→</span>, o jogo faz:<br>
+Cada passo soma à posição:<br>
 <span class="hi">posição_nova = posição_atual + velocidade</span><br><br>
-Na matriz, os valores <span class="hi">tx</span> e <span class="hi">ty</span> na última coluna representam o deslocamento.`,
-    init(state) {
-      player.x = 80; player.y = groundY();
-      player.vx = 0; player.vy = 0;
-      state.star = { x: W - 100, y: groundY() - 20 };
-      state.platforms = [
-        { x: W/2 - 60, y: groundY() - 80, w: 120, h: 14 }
-      ];
-      state.objects = [];
-      state.selectedObj = null;
-    },
-    update(state, dt) {
-      // Star collection
-      const dx = player.x - state.star.x;
-      const dy = player.y - 20 - state.star.y;
-      if (Math.sqrt(dx*dx+dy*dy) < 30) return true;
-      return false;
-    },
-    draw(state) {
-      // Star
-      drawStar(state.star.x, state.star.y, 14, '#ffd700', '#fff8a0');
-      // Platforms
-      state.platforms.forEach(p => drawPlatform(p));
-      // Hint arrow
-      if (player.x < W/2) {
-        ctx.save();
-        ctx.globalAlpha = 0.4 + 0.2*Math.sin(Date.now()*0.004);
-        ctx.fillStyle = '#ffd700';
-        ctx.font = '20px serif';
-        ctx.fillText('→', state.star.x - 50, state.star.y - 10);
-        ctx.restore();
-      }
-    },
-    lcText: 'Você aplicou translação! Somar vetores move o personagem pelo espaço.',
-    extraHint: ''
+Na matriz, <span class="hi">tx</span> e <span class="hi">ty</span> são o deslocamento.`,
+    phases: [
+      {
+        name: 'Primeiros passos',
+        objective: 'Chegue à estrela! Use ← → para mover, ↑ para pular.',
+        extraHint: '',
+        init(state) {
+          player.x = 80; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [];
+          state.platforms = [];
+          state.stars = [{ x: W - 100, y: groundY() - 20 }];
+        },
+        update(state) { return checkStars(state); },
+        draw(state) { drawStars(state); },
+        lcText: 'Translação: você somou vetores até a estrela!'
+      },
+      {
+        name: 'Escadinha',
+        objective: 'Suba a escadinha de plataformas até a estrela alta.',
+        extraHint: '',
+        init(state) {
+          player.x = 80; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [];
+          state.platforms = [
+            { x: W*0.40, y: groundY()-70,  w: 110, h: 14 },
+            { x: W*0.6,  y: groundY()-140, w: 110, h: 14 },
+          ];
+          state.stars = [
+            { x: W*0.6, y: groundY()-190 },
+            { x: W-80,  y: groundY()-20 },
+          ];
+        },
+        update(state) { return checkStars(state); },
+        draw(state) { state.platforms.forEach(p => drawPlatform(p)); drawStars(state); },
+        lcText: 'Cada salto é uma soma de vetores — translação pura!'
+      },
+      {
+        name: 'Salto no vão',
+        objective: 'Atravesse o vão pulando de plataforma em plataforma.',
+        extraHint: '',
+        init(state) {
+          player.x = 80; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [];
+          state.platforms = [
+            { x: W*0.3,  y: groundY()-70,  w: 110, h: 14 },
+            { x: W*0.48, y: groundY()-150, w: 110, h: 14 },
+          ];
+          state.stars = [
+            { x: W*0.575, y: groundY()-190 },
+            { x: W-80, y: groundY()-20 },
+          ];
+        },
+        update(state) { return checkStars(state); },
+        draw(state) { state.platforms.forEach(p => drawPlatform(p)); drawStars(state); },
+        lcText: 'Você combinou vetores horizontais e verticais no salto!'
+      },
+      {
+        name: 'Teste do mensageiro',
+        objective: 'Colete as 3 estrelas do percurso.',
+        extraHint: '',
+        init(state) {
+          player.x = 80; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [];
+          state.platforms = [
+            { x: W*0.62, y: groundY()-90,  w: 110, h: 14 },
+            { x: W*0.78, y: groundY()-170, w: 110, h: 14 },
+          ];
+          state.stars = [
+            { x: W*0.3,  y: groundY()-20 },
+            { x: W*0.62, y: groundY()-190 },
+            { x: W*0.78, y: groundY()-270 },
+          ];
+        },
+        update(state) { return checkStars(state); },
+        draw(state) { state.platforms.forEach(p => drawPlatform(p)); drawStars(state); },
+        lcText: 'Percurso completo! Translação dominada.'
+      },
+    ]
   },
 
-  // ── LEVEL 2: Scale ──
+  // ══ MUNDO 2 · ESCALA ══
   {
     name: 'Escala',
-    objective: 'Encolha as caixas vermelhas para abrir passagem. Use Q/E para escalar o objeto selecionado.',
-    concept: () => `<span class="tag tag-s">S</span> <span class="hi2">Escala</span> = multiplicar por escalar.<br><br>
-Quando você escala um objeto por <span class="hi2">s</span>, cada ponto é multiplicado:<br>
-<span class="hi2">x_novo = s · x &nbsp;&nbsp; y_novo = s · y</span><br><br>
-Na matriz, os valores <span class="hi2">sx</span> e <span class="hi2">sy</span> ficam na diagonal principal.`,
-    init(state) {
-      player.x = 60; player.y = groundY();
-      player.vx = 0; player.vy = 0;
-      state.star = { x: W - 80, y: groundY() - 20 };
-      state.platforms = [];
-      state.objects = [
-        { x: W*0.35, y: groundY()-50, w: 60, h: 100, scale: 1.0, color: '#f78166', type:'box', label:'A' },
-        { x: W*0.6,  y: groundY()-50, w: 60, h: 100, scale: 1.0, color: '#f78166', type:'box', label:'B' },
-      ];
-      state.selectedObj = 0;
-    },
-    update(state, dt) {
-      // Scale with Q/E
-      const obj = state.objects[state.selectedObj];
-      if (obj) {
-        if (keys['q'] || keys['Q']) { obj.scale = Math.max(0.15, obj.scale - 0.015); }
-        if (keys['e'] || keys['E']) { obj.scale = Math.min(2.0, obj.scale + 0.015); }
-        if (keys['Tab']) { keys['Tab'] = false; state.selectedObj = (state.selectedObj+1)%state.objects.length; }
-      }
-      // Select by clicking
-      const dx = player.x - state.star.x;
-      const dy = player.y - 20 - state.star.y;
-      if (Math.sqrt(dx*dx+dy*dy) < 30) return true;
-      return false;
-    },
-    draw(state) {
-      state.objects.forEach((o,i) => {
-        const sw = o.w * o.scale;
-        const sh = o.h * o.scale;
-        const bx = o.x - sw/2, by = o.y + o.h/2 - sh;
-        ctx.save();
-        ctx.globalAlpha = 0.85;
-        ctx.fillStyle = i===state.selectedObj ? '#ff9070' : o.color;
-        ctx.strokeStyle = i===state.selectedObj ? '#fff' : '#bb5544';
-        ctx.lineWidth = i===state.selectedObj ? 2 : 1;
-        ctx.fillRect(bx, by, sw, sh);
-        ctx.strokeRect(bx, by, sw, sh);
-        // Label
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 13px DM Mono';
-        ctx.textAlign = 'center';
-        ctx.fillText(o.label, o.x, by + sh/2 + 5);
-        // Scale indicator
-        ctx.font = '10px DM Mono';
-        ctx.fillStyle = i===state.selectedObj ? '#fff' : '#ffaa88';
-        ctx.fillText(`×${o.scale.toFixed(2)}`, o.x, by - 6);
-        ctx.restore();
-      });
-      drawStar(state.star.x, state.star.y, 14, '#ffd700', '#fff8a0');
-    },
-    getObjMatrix(state) {
-      const o = state.objects[state.selectedObj];
-      if (!o) return null;
-      return [[o.scale,0,0],[0,o.scale,0],[0,0,1]];
-    },
-    lcText: 'Você usou escala! Multiplicar a diagonal da matriz redimensiona o objeto.',
-    extraHint: '<span class="key">Q</span><span class="key">E</span> escalar objeto &nbsp; <span class="key">Tab</span> trocar objeto'
+    concept: () => `<span class="tag tag-s">S</span> <span class="hi2">Escala</span> = multiplicar por um número.<br><br>
+Cada coordenada é multiplicada por <span class="hi2">s</span>:<br>
+<span class="hi2">x' = s·x &nbsp;&nbsp; y' = s·y</span><br><br>
+Na matriz, <span class="hi2">sx</span> e <span class="hi2">sy</span> ficam na diagonal.`,
+    phases: [
+      {
+        name: 'Portão',
+        objective: 'A caixa bloqueia o caminho. Encolha-a com Q/E e passe por cima.',
+        extraHint: '<span class="key">Q</span><span class="key">E</span> escalar',
+        init(state) {
+          player.x = 60; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [
+            { label: 'A', x: W*0.45, y: groundY()-75, w: 60, h: 150, scale: 1.0, smin: 0.15, smax: 2.0, color: '#f78166', type: 'box' },
+          ];
+          state.stars = [{ x: W-80, y: groundY()-20 }];
+        },
+        update(state) {
+          if (keys['q'] || keys['Q']) scaleTargetBy(-0.015);
+          if (keys['e'] || keys['E']) scaleTargetBy(0.015);
+          return checkStars(state);
+        },
+        draw(state) { drawBoxes(state); drawStars(state); },
+        getObjMatrix(state) {
+          const o = selObj(); if (!o) return null;
+          return [[o.scale,0,0],[0,o.scale,0],[0,0,1]];
+        },
+        lcText: 'Escala: multiplicar a diagonal redimensiona o objeto.'
+      },
+      {
+        name: 'Dois portões',
+        objective: 'Colete as 2 estrelas. Tab troca a caixa selecionada.',
+        extraHint: '<span class="key">Q</span><span class="key">E</span> escalar &nbsp; <span class="key">Tab</span> trocar',
+        init(state) {
+          player.x = 60; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [
+            { label: 'A', x: W*0.3,  y: groundY()-75, w: 60, h: 150, scale: 1.0, smin: 0.15, smax: 2.0, color: '#f78166', type: 'box' },
+            { label: 'B', x: W*0.55, y: groundY()-75, w: 60, h: 150, scale: 1.0, smin: 0.15, smax: 2.0, color: '#f78166', type: 'box' },
+          ];
+          state.stars = [
+            { x: W*0.42, y: groundY()-20 },
+            { x: W-80,   y: groundY()-20 },
+          ];
+        },
+        update(state) {
+          if (keys['q'] || keys['Q']) scaleTargetBy(-0.015);
+          if (keys['e'] || keys['E']) scaleTargetBy(0.015);
+          if (keys['Tab']) { keys['Tab'] = false; state.sel = (state.sel + 1) % state.targets.length; }
+          return checkStars(state);
+        },
+        draw(state) { drawBoxes(state); drawStars(state); },
+        getObjMatrix(state) {
+          const o = selObj(); if (!o) return null;
+          return [[o.scale,0,0],[0,o.scale,0],[0,0,1]];
+        },
+        lcText: 'Encolher cada caixa abriu os dois portões!'
+      },
+      {
+        name: 'Fenda',
+        objective: 'Passe por baixo da ponte: encolha o personagem com Q/E.',
+        extraHint: '<span class="key">Q</span><span class="key">E</span> encolher/crescer você',
+        init(state) {
+          player.x = 60; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [
+            { x: W*0.45, y: groundY()-92, w: 140, h: 94, anchor: 'center', fixed: true, scale: 1.0, color: '#8b98a5', type: 'wall' },
+          ];
+          state.scalePlayer = true;
+          state.stars = [{ x: W-90, y: groundY()-20 }];
+        },
+        update(state) {
+          if (keys['q'] || keys['Q']) scaleTargetBy(-0.015);
+          if (keys['e'] || keys['E']) scaleTargetBy(0.015);
+          return checkStars(state);
+        },
+        draw(state) { drawBoxes(state); drawStars(state); },
+        lcText: 'A matriz de escala aplicada em você mesmo!'
+      },
+      {
+        name: 'Caminho apertado',
+        objective: 'Colete as 3 estrelas: encolha a caixa e a si mesmo.',
+        extraHint: '<span class="key">Q</span><span class="key">E</span> escalar &nbsp; <span class="key">Tab</span> trocar',
+        init(state) {
+          player.x = 60; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [
+            { label: 'A', x: W*0.28, y: groundY()-75, w: 60, h: 150, scale: 1.0, smin: 0.15, smax: 2.0, color: '#f78166', type: 'box' },
+            { x: W*0.62, y: groundY()-92, w: 140, h: 94, anchor: 'center', fixed: true, scale: 1.0, color: '#8b98a5', type: 'wall' },
+          ];
+          state.scalePlayer = true;
+          state.stars = [
+            { x: W*0.45, y: groundY()-20 },
+            { x: W*0.78, y: groundY()-20 },
+            { x: W-90,   y: groundY()-20 },
+          ];
+        },
+        update(state) {
+          if (keys['q'] || keys['Q']) scaleTargetBy(-0.015);
+          if (keys['e'] || keys['E']) scaleTargetBy(0.015);
+          if (keys['Tab']) { keys['Tab'] = false; state.sel = (state.sel + 1) % state.targets.length; }
+          return checkStars(state);
+        },
+        draw(state) { drawBoxes(state); drawStars(state); },
+        getObjMatrix(state) {
+          const o = selObj(); if (!o) return null;
+          return [[o.scale,0,0],[0,o.scale,0],[0,0,1]];
+        },
+        lcText: 'Você encolheu caixas E a si mesmo — escala dominada!'
+      },
+    ]
   },
 
-  // ── LEVEL 3: Rotation ──
+  // ══ MUNDO 3 · ROTAÇÃO ══
   {
     name: 'Rotação',
-    objective: 'Gire as plataformas para criar um caminho. Use Q/E para rotacionar o objeto selecionado.',
     concept: () => `<span class="tag tag-r">R</span> <span class="hi3">Rotação</span> usa seno e cosseno.<br><br>
-Girar por ângulo <span class="hi3">θ</span> aplica:<br>
+Girar por um ângulo <span class="hi3">θ</span> aplica:<br>
 <span class="hi3">x' = x·cos θ − y·sen θ</span><br>
 <span class="hi3">y' = x·sen θ + y·cos θ</span><br><br>
 Repare nos valores de cos/sen mudando na matriz ao girar!`,
-    init(state) {
-      player.x = 60; player.y = groundY();
-      player.vx = 0; player.vy = 0;
-      state.star = { x: W - 80, y: groundY() - 130 };
-      state.platforms = [];
-      state.objects = [
-        { x: W*0.3, y: groundY()-60, w: 130, h: 14, angle: 0, color: '#79c0ff', type:'plat', label:'A' },
-        { x: W*0.62, y: groundY()-130, w: 130, h: 14, angle: 0, color: '#79c0ff', type:'plat', label:'B' },
-      ];
-      state.selectedObj = 0;
-    },
-    update(state, dt) {
-      if (keys['q'] || keys['Q']) { state.objects[state.selectedObj].angle -= 0.025; }
-      if (keys['e'] || keys['E']) { state.objects[state.selectedObj].angle += 0.025; }
-      if (keys['Tab']) { keys['Tab'] = false; state.selectedObj = (state.selectedObj+1)%state.objects.length; }
-      const dx = player.x - state.star.x;
-      const dy = player.y - 20 - state.star.y;
-      if (Math.sqrt(dx*dx+dy*dy) < 30) return true;
-      return false;
-    },
-    draw(state) {
-      state.objects.forEach((o,i) => {
-        ctx.save();
-        ctx.translate(o.x, o.y);
-        ctx.rotate(o.angle);
-        ctx.fillStyle = i===state.selectedObj ? '#a8d8ff' : o.color;
-        ctx.strokeStyle = i===state.selectedObj ? '#fff' : '#5590bb';
-        ctx.lineWidth = i===state.selectedObj ? 2 : 1;
-        ctx.globalAlpha = 0.9;
-        ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
-        ctx.strokeRect(-o.w/2, -o.h/2, o.w, o.h);
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 12px DM Mono';
-        ctx.textAlign = 'center';
-        ctx.fillText(o.label, 0, 4);
-        // Angle indicator
-        const deg = Math.round(o.angle * 180/Math.PI);
-        ctx.font = '10px DM Mono';
-        ctx.fillStyle = i===state.selectedObj ? '#fff' : '#aaccff';
-        ctx.fillText(`${deg}°`, 0, -o.h/2 - 6);
-        ctx.restore();
-      });
-      drawStar(state.star.x, state.star.y, 14, '#ffd700', '#fff8a0');
-    },
-    getObjMatrix(state) {
-      const o = state.objects[state.selectedObj];
-      if (!o) return null;
-      const c = Math.cos(o.angle), s = Math.sin(o.angle);
-      return [[c,-s,0],[s,c,0],[0,0,1]];
-    },
-    getRotatedPlatforms(state) {
-      return state.objects.map(o => ({ ...o }));
-    },
-    lcText: 'Você usou rotação! Seno e cosseno determinam como os pontos giram ao redor da origem.',
-    extraHint: '<span class="key">Q</span><span class="key">E</span> girar objeto &nbsp; <span class="key">Tab</span> trocar'
+    phases: [
+      {
+        name: 'Giro simples',
+        objective: 'Gire a plataforma até ela deitar e pule até a estrela.',
+        extraHint: '<span class="key">Q</span><span class="key">E</span> girar',
+        init(state) {
+          player.x = 60; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [
+            { label: 'A', x: W-350, y: groundY()-80, w: 130, h: 14, angle: Math.PI/2, color: '#79c0ff', type: 'plat' },
+          ];
+          state.stars = [
+            { x: W-280, y: groundY()-185 },
+            { x: W-90,  y: groundY()-20 },
+          ];
+        },
+        update(state) {
+          if (keys['q'] || keys['Q']) rotateTargetBy(-0.025);
+          if (keys['e'] || keys['E']) rotateTargetBy(0.025);
+          return checkStars(state);
+        },
+        draw(state) { drawPlats(state); drawStars(state); },
+        getObjMatrix(state) {
+          const o = selObj(); if (!o) return null;
+          const c = Math.cos(o.angle), s = Math.sin(o.angle);
+          return [[c,-s,0],[s,c,0],[0,0,1]];
+        },
+        lcText: 'Uma rotação simples abriu o caminho!'
+      },
+      {
+        name: 'Escada giratória',
+        objective: 'Gire as duas plataformas e suba até a estrela alta.',
+        extraHint: '<span class="key">Q</span><span class="key">E</span> girar &nbsp; <span class="key">Tab</span> trocar',
+        init(state) {
+          player.x = 60; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [
+            { label: 'A', x: W-350, y: groundY()-80,  w: 130, h: 14, angle: Math.PI/2, color: '#79c0ff', type: 'plat' },
+            { label: 'B', x: W-160, y: groundY()-170, w: 130, h: 14, angle: Math.PI/2, color: '#79c0ff', type: 'plat' },
+          ];
+          state.stars = [
+            { x: W-110, y: groundY()-260 },
+            { x: W-90,  y: groundY()-20 },
+          ];
+        },
+        update(state) {
+          if (keys['q'] || keys['Q']) rotateTargetBy(-0.025);
+          if (keys['e'] || keys['E']) rotateTargetBy(0.025);
+          if (keys['Tab']) { keys['Tab'] = false; state.sel = (state.sel + 1) % state.targets.length; }
+          return checkStars(state);
+        },
+        draw(state) { drawPlats(state); drawStars(state); },
+        getObjMatrix(state) {
+          const o = selObj(); if (!o) return null;
+          const c = Math.cos(o.angle), s = Math.sin(o.angle);
+          return [[c,-s,0],[s,c,0],[0,0,1]];
+        },
+        lcText: 'Seno e cosseno guiaram sua subida!'
+      },
+      {
+        name: 'Torres',
+        objective: 'Colete as 3 estrelas usando as duas plataformas.',
+        extraHint: '<span class="key">Q</span><span class="key">E</span> girar &nbsp; <span class="key">Tab</span> trocar',
+        init(state) {
+          player.x = 60; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [
+            { label: 'A', x: W-350, y: groundY()-80,  w: 130, h: 14, angle: Math.PI/2, color: '#79c0ff', type: 'plat' },
+            { label: 'B', x: W-160, y: groundY()-170, w: 130, h: 14, angle: Math.PI/2, color: '#79c0ff', type: 'plat' },
+          ];
+          state.stars = [
+            { x: W-280, y: groundY()-185 },
+            { x: W-200, y: groundY()-270 },
+            { x: W-90,  y: groundY()-20 },
+          ];
+        },
+        update(state) {
+          if (keys['q'] || keys['Q']) rotateTargetBy(-0.025);
+          if (keys['e'] || keys['E']) rotateTargetBy(0.025);
+          if (keys['Tab']) { keys['Tab'] = false; state.sel = (state.sel + 1) % state.targets.length; }
+          return checkStars(state);
+        },
+        draw(state) { drawPlats(state); drawStars(state); },
+        getObjMatrix(state) {
+          const o = selObj(); if (!o) return null;
+          const c = Math.cos(o.angle), s = Math.sin(o.angle);
+          return [[c,-s,0],[s,c,0],[0,0,1]];
+        },
+        lcText: 'As torres giratórias foram conquistadas!'
+      },
+    ]
   },
 
-  // ── LEVEL 4: Composition ──
+  // ══ MUNDO 4 · COMPOSIÇÃO ══
   {
     name: 'Composição',
-    objective: 'Use todas as transformações para resolver o puzzle. Q/E girar, Z/X escalar, Tab trocar objeto.',
     concept: () => `<span class="tag tag-c">C</span> <span class="hi4">Composição</span> = multiplicar matrizes.<br><br>
-Aplicar várias transformações juntas equivale a multiplicar as matrizes na ordem:<br>
+Várias transformações juntas equivale a multiplicar na ordem:<br>
 <span class="hi4">M = T · R · S</span><br><br>
 A ordem importa! Rotação depois de escala dá resultado diferente de escala depois de rotação.`,
-    init(state) {
-      player.x = 60; player.y = groundY();
-      player.vx = 0; player.vy = 0;
-      state.star = { x: W/2, y: groundY() - 200 };
-      state.platforms = [
-        { x: W*0.5 - 50, y: groundY() - 100, w: 100, h: 14 }
-      ];
-      state.objects = [
-        { x: W*0.25, y: groundY()-60, w: 110, h: 14, angle: 0, scale: 1.0, color: '#ffa657', type:'combo', label:'A' },
-        { x: W*0.75, y: groundY()-60, w: 110, h: 14, angle: 0, scale: 1.0, color: '#ffa657', type:'combo', label:'B' },
-      ];
-      state.selectedObj = 0;
-    },
-    update(state, dt) {
-      const o = state.objects[state.selectedObj];
-      if (keys['q'] || keys['Q']) o.angle -= 0.025;
-      if (keys['e'] || keys['E']) o.angle += 0.025;
-      if (keys['z'] || keys['Z']) o.scale = Math.max(0.2, o.scale - 0.015);
-      if (keys['x'] || keys['X']) o.scale = Math.min(2.5, o.scale + 0.015);
-      if (keys['Tab']) { keys['Tab'] = false; state.selectedObj = (state.selectedObj+1)%state.objects.length; }
-      const dx = player.x - state.star.x;
-      const dy = player.y - 20 - state.star.y;
-      if (Math.sqrt(dx*dx+dy*dy) < 30) return true;
-      return false;
-    },
-    draw(state) {
-      state.objects.forEach((o,i) => {
-        ctx.save();
-        ctx.translate(o.x, o.y);
-        ctx.rotate(o.angle);
-        ctx.scale(o.scale, o.scale);
-        ctx.fillStyle = i===state.selectedObj ? '#ffcc88' : o.color;
-        ctx.strokeStyle = i===state.selectedObj ? '#fff' : '#bb7733';
-        ctx.lineWidth = i===state.selectedObj ? 2/o.scale : 1/o.scale;
-        ctx.globalAlpha = 0.9;
-        ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
-        ctx.strokeRect(-o.w/2, -o.h/2, o.w, o.h);
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#fff';
-        ctx.font = `bold ${12/o.scale}px DM Mono`;
-        ctx.textAlign = 'center';
-        ctx.fillText(o.label, 0, 4/o.scale);
-        ctx.restore();
-        // Indicators outside transform
-        ctx.font = '10px DM Mono';
-        ctx.fillStyle = i===state.selectedObj ? '#fff' : '#ffcc88';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${Math.round(o.angle*180/Math.PI)}° ×${o.scale.toFixed(1)}`, o.x, o.y - o.h/2*o.scale - 8);
-      });
-      state.platforms.forEach(p => drawPlatform(p));
-      drawStar(state.star.x, state.star.y, 14, '#ffd700', '#fff8a0');
-    },
-    getObjMatrix(state) {
-      const o = state.objects[state.selectedObj];
-      if (!o) return null;
-      const c = Math.cos(o.angle)*o.scale, s = Math.sin(o.angle)*o.scale;
-      return [[c,-s,0],[s,c,0],[0,0,1]];
-    },
-    lcText: '🎉 Você completou todos os níveis! Translação, escala, rotação e composição — é assim que jogos reais funcionam!',
-    extraHint: '<span class="key">Q</span><span class="key">E</span> girar &nbsp;<span class="key">Z</span><span class="key">X</span> escalar &nbsp;<span class="key">Tab</span> trocar'
-  }
+    phases: [
+      {
+        name: 'Estique',
+        objective: 'Gire e estique a plataforma para alcançar a estrela.',
+        extraHint: '<span class="key">Q</span><span class="key">E</span> girar &nbsp; <span class="key">Z</span><span class="key">X</span> escalar',
+        init(state) {
+          player.x = 60; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [
+            { label: 'A', x: W-380, y: groundY()-88, w: 110, h: 14, angle: Math.PI/2, scale: 1.0, smin: 1.0, smax: 2.5, color: '#ffa657', type: 'combo' },
+          ];
+          state.stars = [{ x: W-70, y: groundY()-195 }];
+        },
+        update(state) {
+          if (keys['q'] || keys['Q']) rotateTargetBy(-0.025);
+          if (keys['e'] || keys['E']) rotateTargetBy(0.025);
+          if (keys['z'] || keys['Z']) scaleTargetBy(-0.015);
+          if (keys['x'] || keys['X']) scaleTargetBy(0.015);
+          return checkStars(state);
+        },
+        draw(state) { drawCombos(state); drawStars(state); },
+        getObjMatrix(state) {
+          const o = selObj(); if (!o) return null;
+          const c = Math.cos(o.angle)*o.scale, s = Math.sin(o.angle)*o.scale;
+          return [[c,-s,0],[s,c,0],[0,0,1]];
+        },
+        lcText: 'Rotação + escala combinadas numa única matriz!'
+      },
+      {
+        name: 'Ponte dupla',
+        objective: 'Gire as duas e estique para atravessar até a estrela.',
+        extraHint: '<span class="key">Q</span><span class="key">E</span> girar &nbsp; <span class="key">Z</span><span class="key">X</span> escalar &nbsp; <span class="key">Tab</span> trocar',
+        init(state) {
+          player.x = 60; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [
+            { label: 'A', x: W-480, y: groundY()-88,  w: 110, h: 14, angle: Math.PI/2, scale: 1.0, smin: 1.0, smax: 2.5, color: '#ffa657', type: 'combo' },
+            { label: 'B', x: W-150, y: groundY()-185, w: 110, h: 14, angle: Math.PI/2, scale: 1.0, smin: 1.0, smax: 2.5, color: '#ffa657', type: 'combo' },
+          ];
+          state.stars = [
+            { x: W-110, y: groundY()-260 },
+            { x: W-90,  y: groundY()-20 },
+          ];
+        },
+        update(state) {
+          if (keys['q'] || keys['Q']) rotateTargetBy(-0.025);
+          if (keys['e'] || keys['E']) rotateTargetBy(0.025);
+          if (keys['z'] || keys['Z']) scaleTargetBy(-0.015);
+          if (keys['x'] || keys['X']) scaleTargetBy(0.015);
+          if (keys['Tab']) { keys['Tab'] = false; state.sel = (state.sel + 1) % state.targets.length; }
+          return checkStars(state);
+        },
+        draw(state) { drawCombos(state); drawStars(state); },
+        getObjMatrix(state) {
+          const o = selObj(); if (!o) return null;
+          const c = Math.cos(o.angle)*o.scale, s = Math.sin(o.angle)*o.scale;
+          return [[c,-s,0],[s,c,0],[0,0,1]];
+        },
+        lcText: 'A ponte dupla: duas matrizes combinadas!'
+      },
+      {
+        name: 'Grande travessia',
+        objective: 'Colete as 3 estrelas na travessia completa.',
+        extraHint: '<span class="key">Q</span><span class="key">E</span> girar &nbsp; <span class="key">Z</span><span class="key">X</span> escalar &nbsp; <span class="key">Tab</span> trocar',
+        init(state) {
+          player.x = 60; player.y = groundY();
+          player.vx = 0; player.vy = 0;
+          state.objects = [
+            { label: 'A', x: W-480, y: groundY()-88,  w: 110, h: 14, angle: Math.PI/2, scale: 1.0, smin: 1.0, smax: 2.5, color: '#ffa657', type: 'combo' },
+            { label: 'B', x: W-150, y: groundY()-185, w: 110, h: 14, angle: Math.PI/2, scale: 1.0, smin: 1.0, smax: 2.5, color: '#ffa657', type: 'combo' },
+          ];
+          state.stars = [
+            { x: W-480, y: groundY()-195 },
+            { x: W-110, y: groundY()-260 },
+            { x: W-90,  y: groundY()-20 },
+          ];
+        },
+        update(state) {
+          if (keys['q'] || keys['Q']) rotateTargetBy(-0.025);
+          if (keys['e'] || keys['E']) rotateTargetBy(0.025);
+          if (keys['z'] || keys['Z']) scaleTargetBy(-0.015);
+          if (keys['x'] || keys['X']) scaleTargetBy(0.015);
+          if (keys['Tab']) { keys['Tab'] = false; state.sel = (state.sel + 1) % state.targets.length; }
+          return checkStars(state);
+        },
+        draw(state) { drawCombos(state); drawStars(state); },
+        getObjMatrix(state) {
+          const o = selObj(); if (!o) return null;
+          const c = Math.cos(o.angle)*o.scale, s = Math.sin(o.angle)*o.scale;
+          return [[c,-s,0],[s,c,0],[0,0,1]];
+        },
+        lcText: '🎉 Travessia completa! Você dominou as transformações!'
+      },
+    ]
+  },
 ];
 
-// ═══════════════════════════════════════════════
 //  PHYSICS & COLLISION
 // ═══════════════════════════════════════════════
 const GRAVITY = 900;
 const JUMP = -480;
 const SPEED = 220;
+const STEP_OVER = 36; // box top this close to the ground can be stepped over
 
 function getPlatforms(state) {
   const all = [...(state.platforms || [])];
@@ -663,10 +863,11 @@ function getPlatforms(state) {
 
 function getBoxes(state) {
   if (!state.objects) return [];
-  return state.objects.filter(o => o.type === 'box').map(o => {
+  return state.objects.filter(o => o.type === 'box' || o.type === 'wall').map(o => {
     const sw = o.w * o.scale;
     const sh = o.h * o.scale;
-    return { x: o.x - sw/2, y: o.y + o.h/2 - sh, w: sw, h: sh };
+    const y = (o.anchor === 'center') ? o.y - sh/2 : o.y + o.h/2 - sh;
+    return { x: o.x - sw/2, y, w: sw, h: sh };
   });
 }
 
@@ -704,12 +905,14 @@ function updatePlayer(dt, state) {
   // Wall bounds
   player.x = Math.max(20, Math.min(W-20, player.x));
 
-  // Platform collisions
+  // Platform collisions (largura e altura dependem da escala do personagem)
+  const pw = 10 * player.scale;
+  const phH = 56 * player.scale;
   const plats = getPlatforms(state);
   plats.forEach(p => {
     const foot = player.y;
     const prevFoot = foot - player.vy * dt;
-    if (player.x + 10 > p.x && player.x - 10 < p.x + p.w) {
+    if (player.x + pw > p.x && player.x - pw < p.x + p.w) {
       if (prevFoot <= p.y + 2 && foot >= p.y && player.vy >= 0) {
         player.y = p.y;
         player.vy = 0;
@@ -718,20 +921,33 @@ function updatePlayer(dt, state) {
     }
   });
 
-  // Box collisions (solid)
+  // Box collisions (solid; boxes ≤ STEP_OVER tall can be stepped over)
   const boxes = getBoxes(state);
   boxes.forEach(b => {
-    const foot = player.y;
-    if (player.x + 10 > b.x && player.x - 10 < b.x + b.w) {
-      if (foot > b.y && foot < b.y + b.h + 30 && player.vy >= 0) {
-        // From top
-        if (foot - player.vy*dt <= b.y + 4) {
-          player.y = b.y;
-          player.vy = 0;
-          player.onGround = true;
-        }
-      }
+    if (player.x + pw <= b.x || player.x - pw >= b.x + b.w) return;
+
+    // Short box: step over it
+    if (b.h <= STEP_OVER) {
+      if (player.y > b.y) { player.y = b.y; player.vy = 0; player.onGround = true; }
+      return;
     }
+
+    // Tall box is solid: only interact when vertically overlapping
+    if (!(player.y > b.y && player.y - phH < b.y + b.h)) return;
+
+    // Land when falling from above
+    const prevFoot = player.y - player.vy * dt;
+    if (player.vy >= 0 && prevFoot <= b.y + 2) {
+      player.y = b.y;
+      player.vy = 0;
+      player.onGround = true;
+      return;
+    }
+
+    // Block: push out horizontally
+    if (player.x < b.x + b.w / 2) player.x = b.x - pw;
+    else player.x = b.x + b.w + pw;
+    player.vx = 0;
   });
 }
 
@@ -791,9 +1007,11 @@ function drawPlatform(p) {
   ctx.restore();
 }
 
-function drawStickFigure(x, y, facing, walkFrame, vx, vy) {
+function drawStickFigure(x, y, facing, walkFrame, vx, vy, scale) {
+  scale = scale || 1;
   ctx.save();
   ctx.translate(x, y);
+  ctx.scale(scale, scale);
 
   const isWalking = Math.abs(vx) > 10;
   const swing = isWalking ? Math.sin(walkFrame * Math.PI/2) * 0.4 : 0;
@@ -833,12 +1051,14 @@ function drawStickFigure(x, y, facing, walkFrame, vx, vy) {
   ctx.lineTo(8 + swing*10, 0);
   ctx.stroke();
 
-  // Coordinate label
+  ctx.restore();
+
+  // Coordinate label (fora da escala, sempre legível)
+  ctx.save();
   ctx.font = '9px DM Mono';
   ctx.fillStyle = 'rgba(88,224,106,0.7)';
   ctx.textAlign = 'center';
-  ctx.fillText(`(${Math.round(x)},${Math.round(H-y)})`, 0, 14);
-
+  ctx.fillText(`(${Math.round(x)},${Math.round(H-y)})`, x, y + 14);
   ctx.restore();
 }
 
@@ -862,6 +1082,73 @@ function drawStar(x, y, r, color1, color2) {
   ctx.fillStyle = grad;
   ctx.fill();
   ctx.restore();
+}
+
+// ═══════════════════════════════════════════════
+//  AUDIO (Web Audio API — sem arquivos externos)
+// ═══════════════════════════════════════════════
+let audioCtx = null;
+function ac() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return null; }
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+function beep(freq, dur, type, vol, when) {
+  const a = ac(); if (!a) return;
+  const t0 = a.currentTime + (when || 0);
+  const o = a.createOscillator();
+  const g = a.createGain();
+  o.type = type || 'sine';
+  o.frequency.setValueAtTime(freq, t0);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol || 0.08, t0 + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(a.destination);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function sfxStar()  { beep(880, 0.12, 'sine', 0.08); beep(1318, 0.18, 'sine', 0.06, 0.08); }
+function sfxWin()   { [523, 659, 784, 1047].forEach((f,i) => beep(f, 0.18, 'triangle', 0.07, i*0.09)); }
+function sfxReset() { beep(392, 0.10, 'triangle', 0.05); beep(262, 0.14, 'triangle', 0.05, 0.08); }
+function sfxTransform() { beep(300, 0.045, 'square', 0.022); }
+let lastTfx = 0;
+function tfx() { // som de transformação com throttle (não estoura os ouvidos)
+  const n = Date.now();
+  if (n - lastTfx < 80) return;
+  lastTfx = n;
+  sfxTransform();
+}
+
+// ═══════════════════════════════════════════════
+//  PARTICLES
+// ═══════════════════════════════════════════════
+let particles = [];
+function burst(x, y, color, n) {
+  for (let i = 0; i < (n || 18); i++) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = 60 + Math.random() * 160;
+    particles.push({ x, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp - 40, life: 0.5 + Math.random()*0.4, color });
+  }
+}
+function updateParticles(dt) {
+  particles = particles.filter(p => (p.life -= dt) > 0);
+  particles.forEach(p => {
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 420 * dt;
+    p.vx *= 0.985;
+  });
+}
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 1.8));
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2.4, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  });
 }
 
 // ═══════════════════════════════════════════════
@@ -896,108 +1183,304 @@ function updateVectors() {
 //  LEVEL MANAGEMENT
 // ═══════════════════════════════════════════════
 let state = {};
+let cur = { w: 0, p: 0 };
+let progress = loadProgress();
 
-function initLevel(n) {
-  levelDone = false;
-  document.getElementById('levelComplete').classList.remove('show');
-  state = {};
-  levels[n].init(state);
-  document.getElementById('conceptText').innerHTML = levels[n].concept();
-  document.getElementById('objective-bar').textContent = levels[n].objective;
-  document.getElementById('extraHint').innerHTML = levels[n].extraHint || '';
-  document.getElementById('lvlNum').textContent = n+1;
+// ── helpers de fase ──
+function currentPhase() { return worlds[cur.w].phases[cur.p]; }
+function selTarget() { return (state.targets && state.targets[state.sel]) || null; }
+function selObj() { const t = selTarget(); return (t && t.kind === 'obj') ? t.o : null; }
 
-  // Show/hide object controls
+function scaleTargetBy(d) {
+  const t = selTarget(); if (!t) return;
+  if (t.kind === 'player') { player.scale = Math.min(1.5, Math.max(0.5, player.scale + d)); tfx(); return; }
+  const o = t.o, lo = (o.smin !== undefined) ? o.smin : 0.15, hi = (o.smax !== undefined) ? o.smax : 2.5;
+  const before = o.scale;
+  o.scale = Math.min(hi, Math.max(lo, o.scale + d));
+  if (o.scale !== before) tfx();
+}
+function rotateTargetBy(d) {
+  const t = selTarget(); if (!t || t.kind !== 'obj') return;
+  t.o.angle += d;
+  tfx();
+}
+
+function checkStars(st) {
+  if (!st.stars || !st.stars.length) return false;
+  let all = true;
+  for (const s of st.stars) {
+    if (!s.got) {
+      const dx = player.x - s.x;
+      const dy = (player.y - 20 * player.scale) - s.y;
+      if (Math.sqrt(dx*dx + dy*dy) < 30) {
+        s.got = true;
+        burst(s.x, s.y, '#ffd700', 22);   // partículas douradas
+        sfxStar();                        // som de coleta
+      }
+    }
+    if (!s.got) all = false;
+  }
+  return all;
+}
+function drawStars(st) {
+  (st.stars || []).forEach(s => { if (!s.got) drawStar(s.x, s.y, 14, '#ffd700', '#fff8a0'); });
+}
+
+// ── desenho de objetos ──
+function drawBoxes(st) {
+  (st.objects || []).forEach(o => {
+    const sw = o.w * o.scale, sh = o.h * o.scale;
+    const bx = o.x - sw/2;
+    const by = (o.anchor === 'center') ? o.y - sh/2 : o.y + o.h/2 - sh;
+    const isSel = (o === selObj());
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = isSel ? '#ff9070' : o.color;
+    ctx.strokeStyle = isSel ? '#fff' : (o.fixed ? '#66707a' : '#bb5544');
+    ctx.lineWidth = isSel ? 2 : 1;
+    ctx.fillRect(bx, by, sw, sh);
+    ctx.strokeRect(bx, by, sw, sh);
+    ctx.globalAlpha = 1;
+    if (o.label) {
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 13px DM Mono';
+      ctx.textAlign = 'center';
+      ctx.fillText(o.label, o.x, by + sh/2 + 5);
+    }
+    if (!o.fixed) {
+      ctx.font = '10px DM Mono';
+      ctx.fillStyle = isSel ? '#fff' : '#ffaa88';
+      ctx.textAlign = 'center';
+      ctx.fillText(`×${o.scale.toFixed(2)}`, o.x, by - 6);
+    }
+    ctx.restore();
+  });
+}
+function drawPlats(st) {
+  (st.objects || []).forEach(o => {
+    const isSel = (o === selObj());
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.rotate(o.angle);
+    ctx.fillStyle = isSel ? '#a8d8ff' : o.color;
+    ctx.strokeStyle = isSel ? '#fff' : '#5590bb';
+    ctx.lineWidth = isSel ? 2 : 1;
+    ctx.globalAlpha = 0.9;
+    ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
+    ctx.strokeRect(-o.w/2, -o.h/2, o.w, o.h);
+    ctx.restore();
+    // Rótulo + ângulo (sempre em pé, independente da rotação)
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = '10px DM Mono';
+    ctx.fillStyle = isSel ? '#fff' : '#aaccff';
+    ctx.shadowColor = '#0d1117';
+    ctx.shadowBlur = 4;
+    const deg = Math.round(o.angle * 180/Math.PI);
+    ctx.fillText(`${o.label} · ${deg}°`, o.x, o.y - 10);
+    ctx.restore();
+  });
+}
+function drawCombos(st) {
+  (st.objects || []).forEach(o => {
+    const isSel = (o === selObj());
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.rotate(o.angle);
+    ctx.scale(o.scale, o.scale);
+    ctx.fillStyle = isSel ? '#ffcc88' : o.color;
+    ctx.strokeStyle = isSel ? '#fff' : '#bb7733';
+    ctx.lineWidth = isSel ? 2/o.scale : 1/o.scale;
+    ctx.globalAlpha = 0.9;
+    ctx.fillRect(-o.w/2, -o.h/2, o.w, o.h);
+    ctx.strokeRect(-o.w/2, -o.h/2, o.w, o.h);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${12/o.scale}px DM Mono`;
+    ctx.textAlign = 'center';
+    ctx.fillText(o.label, 0, 4/o.scale);
+    ctx.restore();
+    ctx.save();
+    ctx.font = '10px DM Mono';
+    ctx.fillStyle = isSel ? '#fff' : '#ffcc88';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#0d1117';
+    ctx.shadowBlur = 4;
+    ctx.fillText(`${Math.round(o.angle*180/Math.PI)}° ×${o.scale.toFixed(1)}`, o.x, o.y - 12);
+    ctx.restore();
+  });
+}
+
+// ── progresso (localStorage) ──
+function saveProgress() {
+  try { localStorage.setItem('linearland-progress', JSON.stringify(progress)); } catch (e) {}
+}
+function loadProgress() {
+  try {
+    const d = JSON.parse(localStorage.getItem('linearland-progress') || 'null');
+    if (Array.isArray(d) && d.length === worlds.length) {
+      return d.map((v, i) => Math.max(0, Math.min((+v) || 0, worlds[i].phases.length)));
+    }
+  } catch (e) {}
+  return worlds.map(() => 0);
+}
+
+// ── UI ──
+function rotRow(v) {
+  return `<div class="ctrl-row"><label><span class="tag tag-r">R</span> Ângulo</label>
+    <input type="range" id="sldRot" min="-180" max="180" value="${v}" oninput="sliderRot(this.value)">
+    <span class="ctrl-val" id="sldRotVal">${v}°</span></div>`;
+}
+function scaleRow(min, max, v) {
+  return `<div class="ctrl-row"><label><span class="tag tag-s">S</span> Escala</label>
+    <input type="range" id="sldScale" min="${min}" max="${max}" value="${v}" oninput="sliderScale(this.value)">
+    <span class="ctrl-val" id="sldScaleVal">${(v/100).toFixed(2)}×</span></div>`;
+}
+function buildControls(w) {
   const card = document.getElementById('objCtrlCard');
   const ctrls = document.getElementById('objCtrls');
-  if (n >= 1) {
-    card.style.display = 'block';
-    let html = '';
-    if (n === 1) {
-      html = `<div class="ctrl-row"><label><span class="tag tag-s">S</span> Escala</label>
-        <input type="range" id="sldScale" min="15" max="200" value="100"
-          oninput="applyScaleSlider(this.value)">
-        <span class="ctrl-val" id="sldScaleVal">1.00×</span></div>`;
-    } else if (n === 2) {
-      html = `<div class="ctrl-row"><label><span class="tag tag-r">R</span> Ângulo</label>
-        <input type="range" id="sldRot" min="-180" max="180" value="0"
-          oninput="applyRotSlider(this.value)">
-        <span class="ctrl-val" id="sldRotVal">0°</span></div>`;
-    } else {
-      html = `<div class="ctrl-row"><label><span class="tag tag-r">R</span> Ângulo</label>
-        <input type="range" id="sldRot4" min="-180" max="180" value="0"
-          oninput="applyRotSlider4(this.value)">
-        <span class="ctrl-val" id="sldRotVal4">0°</span></div>
-        <div class="ctrl-row"><label><span class="tag tag-s">S</span> Escala</label>
-        <input type="range" id="sldScale4" min="20" max="250" value="100"
-          oninput="applyScaleSlider4(this.value)">
-        <span class="ctrl-val" id="sldScaleVal4">1.00×</span></div>`;
-    }
-    ctrls.innerHTML = html;
-  } else {
-    card.style.display = 'none';
+  if (w === 0) { card.style.display = 'none'; ctrls.innerHTML = ''; return; }
+  card.style.display = 'block';
+  let html = '';
+  if (state.targets.length > 1) {
+    html += `<div class="ctrl-row"><label>Alvo: <span id="selName" style="color: var(--accent3)">—</span></label><span style="color: var(--muted); font-size: 0.6rem">Tab troca</span></div>`;
   }
+  if (w === 1) html += scaleRow(15, 250, 100);
+  else if (w === 2) html += rotRow(90);
+  else if (w === 3) html += rotRow(90) + scaleRow(100, 250, 100);
+  ctrls.innerHTML = html;
+}
+function syncSliders() {
+  const t = selTarget();
+  const rot = document.getElementById('sldRot');
+  const scl = document.getElementById('sldScale');
+  let ang = null, sc = null;
+  if (t && t.kind === 'obj') { ang = Math.round(t.o.angle * 180 / Math.PI); sc = Math.round(t.o.scale * 100); }
+  else if (t && t.kind === 'player') { sc = Math.round(player.scale * 100); }
+  if (rot && ang !== null && (+rot.value) !== ang) rot.value = ang;
+  if (scl && sc !== null && (+scl.value) !== sc) scl.value = sc;
+  const rv = document.getElementById('sldRotVal');
+  if (rv && ang !== null) rv.textContent = ang + '°';
+  const sv = document.getElementById('sldScaleVal');
+  if (sv && sc !== null) sv.textContent = (sc/100).toFixed(2) + '×';
+  const sn = document.getElementById('selName');
+  if (sn && t) sn.textContent = (t.kind === 'player') ? 'você' : (t.o.label || '?');
+}
+function refreshTopbar() {
+  const tabs = document.getElementById('worldTabs');
+  const chips = document.getElementById('phaseChips');
+  tabs.innerHTML = worlds.map((wd, i) => {
+    const locked = i > 0 && progress[i-1] < worlds[i-1].phases.length;
+    const cls = ['level-tab'];
+    if (i === cur.w) cls.push('active');
+    if (locked) cls.push('locked');
+    return `<button class="${cls.join(' ')}" onclick="goWorld(${i})">M${i+1} · ${wd.name}</button>`;
+  }).join('');
+  const wd = worlds[cur.w];
+  chips.innerHTML = wd.phases.map((pp, i) => {
+    const done = i < progress[cur.w];
+    const locked = i > progress[cur.w];
+    const cls = ['phase-chip'];
+    if (i === cur.p) cls.push('active');
+    if (done) cls.push('done');
+    if (locked) cls.push('locked');
+    return `<button class="${cls.join(' ')}" onclick="goPhase(${cur.w}, ${i})" title="${pp.name}">${done ? '✓' : i+1}</button>`;
+  }).join('');
 }
 
-function applyScaleSlider(v) {
-  if (!state.objects) return;
-  state.objects[state.selectedObj].scale = v/100;
-  document.getElementById('sldScaleVal').textContent = (v/100).toFixed(2)+'×';
-}
-function applyRotSlider(v) {
-  if (!state.objects) return;
-  state.objects[state.selectedObj].angle = v*Math.PI/180;
-  document.getElementById('sldRotVal').textContent = v+'°';
-}
-function applyRotSlider4(v) {
-  if (!state.objects) return;
-  state.objects[state.selectedObj].angle = v*Math.PI/180;
-  document.getElementById('sldRotVal4').textContent = v+'°';
-}
-function applyScaleSlider4(v) {
-  if (!state.objects) return;
-  state.objects[state.selectedObj].scale = v/100;
-  document.getElementById('sldScaleVal4').textContent = (v/100).toFixed(2)+'×';
-}
+// ── fluxo de fases ──
+function initPhase(w, p) {
+  cur = { w: w, p: p };
+  const ph = worlds[w].phases[p];
+  levelDone = false;
+  paused = false;
+  transformsUsed = 0;
+  particles = [];
+  document.getElementById('levelComplete').classList.remove('show');
+  player.scale = 1;
+  state = { stars: [], targets: [], sel: 0, objects: [], platforms: [] };
+  ph.init(state);
+  state.targets = (state.objects || []).filter(o => !o.fixed).map(o => ({ kind: 'obj', o: o }));
+  if (state.scalePlayer) state.targets.push({ kind: 'player' });
+  state.sel = 0;
 
-function goLevel(n) {
-  if (n > unlockedLevels) return;
-  currentLevel = n;
-  document.querySelectorAll('.level-tab').forEach((t,i)=>{
-    t.classList.toggle('active', i===n);
-  });
-  initLevel(n);
-}
+  document.getElementById('conceptText').innerHTML = worlds[w].concept();
+  document.getElementById('objective-bar').textContent = ph.objective;
+  document.getElementById('extraHint').innerHTML = ph.extraHint || '';
+  document.getElementById('lvlNum').textContent = (w + 1) + '-' + (p + 1);
 
-function nextLevel() {
-  const next = currentLevel + 1;
-  if (next >= levels.length) {
-    document.getElementById('lcTitle').textContent = '🏆 Parabéns!';
-    document.getElementById('nextBtn').style.display = 'none';
-    return;
-  }
-  unlockedLevels = Math.max(unlockedLevels, next);
-  document.getElementById('tab'+next).classList.remove('locked');
-  goLevel(next);
+  buildControls(w);
+  refreshTopbar();
+  syncSliders();
 }
-
+function togglePause() {
+  if (levelDone) return;
+  paused = !paused;
+}
+function restartCurrentPhase() {
+  if (levelDone) return;
+  initPhase(cur.w, cur.p);
+  sfxReset();
+}
+function goWorld(i) {
+  if (i < 0 || i >= worlds.length) return;
+  const locked = i > 0 && progress[i-1] < worlds[i-1].phases.length;
+  if (locked) return;
+  initPhase(i, Math.min(progress[i], worlds[i].phases.length - 1));
+}
+function goPhase(w, i) {
+  if (i < 0 || i >= worlds[w].phases.length) return;
+  if (i > progress[w]) return;
+  initPhase(w, i);
+}
+function nextPhase() {
+  const wd = worlds[cur.w];
+  if (cur.p + 1 < wd.phases.length) initPhase(cur.w, cur.p + 1);
+  else if (cur.w + 1 < worlds.length) initPhase(cur.w + 1, 0);
+  else initPhase(0, 0);
+}
 function completeLevel() {
   if (levelDone) return;
   levelDone = true;
-  document.getElementById('lcText').textContent = levels[currentLevel].lcText;
-  if (currentLevel === levels.length-1) {
+  progress = progress.map((v, i) => (i === cur.w) ? Math.max(v, cur.p + 1) : v);
+  saveProgress();
+  refreshTopbar();
+
+  const ph = currentPhase();
+  const isFinal = (cur.w === worlds.length - 1) && (cur.p === worlds[cur.w].phases.length - 1);
+  const nStars = state.stars.filter(s => s.got).length;
+  document.getElementById('lcText').textContent =
+    ph.lcText + `  (${nStars}/${state.stars.length} estrelas · ${transformsUsed} transformações)`;
+  sfxWin();
+  const btn = document.getElementById('nextBtn');
+  if (isFinal) {
     document.getElementById('lcTitle').textContent = '🏆 Você venceu!';
-    document.getElementById('nextBtn').textContent = 'Reiniciar';
-    document.getElementById('nextBtn').onclick = () => { unlockedLevels=0; goLevel(0); ['tab1','tab2','tab3'].forEach(id=>document.getElementById(id).classList.add('locked')); };
+    btn.textContent = 'Jogar de novo';
+    btn.onclick = () => { progress = worlds.map(() => 0); saveProgress(); initPhase(0, 0); };
   } else {
-    document.getElementById('lcTitle').textContent = '✓ Nível Completo!';
-    document.getElementById('nextBtn').textContent = 'Próximo Nível →';
-    document.getElementById('nextBtn').onclick = nextLevel;
+    document.getElementById('lcTitle').textContent = '✓ Fase Completa!';
+    btn.textContent = 'Próxima Fase →';
+    btn.onclick = nextPhase;
   }
   document.getElementById('levelComplete').classList.add('show');
 }
 
-// ═══════════════════════════════════════════════
+// ── sliders ──
+function sliderRot(v) {
+  const t = selTarget();
+  if (t && t.kind === 'obj') t.o.angle = (+v) * Math.PI / 180;
+  syncSliders();
+}
+function sliderScale(v) {
+  const t = selTarget(); if (!t) return;
+  if (t.kind === 'player') player.scale = Math.min(1.5, Math.max(0.5, (+v) / 100));
+  else {
+    const o = t.o, lo = (o.smin !== undefined) ? o.smin : 0.15, hi = (o.smax !== undefined) ? o.smax : 2.5;
+    o.scale = Math.min(hi, Math.max(lo, (+v) / 100));
+  }
+  syncSliders();
+}
+
 //  PLAYER MATRIX (translation)
 // ═══════════════════════════════════════════════
 function getPlayerMatrix() {
@@ -1012,43 +1495,63 @@ function loop(ts) {
   const dt = Math.min((ts - last)/1000, 0.05);
   last = ts;
 
-  const lvl = levels[currentLevel];
+  const ph = currentPhase();
 
-  updatePlayer(dt, state);
+  const frozen = levelDone || paused;
+  if (!frozen) updatePlayer(dt, state);
+  updateParticles(dt);
 
-  // Progress (distance to star)
-  if (state.star) {
-    const d = Math.sqrt((player.x-state.star.x)**2 + (player.y-20-state.star.y)**2);
-    const maxD = Math.sqrt(W*W+H*H);
-    const pct = Math.round(Math.max(0,Math.min(100,(1-d/maxD)*100)));
+  // ── Progresso: estrelas coletadas ──
+  if (state.stars && state.stars.length) {
+    const got = state.stars.filter(s => s.got).length;
+    const pct = Math.round(100 * got / state.stars.length);
     document.getElementById('progFill').style.width = pct+'%';
     document.getElementById('progPct').textContent = pct+'%';
   }
 
-  // Level update
-  if (!levelDone) {
-    const done = lvl.update(state, dt);
-    if (done) completeLevel();
+  // ── Fase ──
+  if (!frozen) {
+    if (ph.update(state, dt)) completeLevel();
   }
 
-  // Matrix display
+  // ── Matriz exibida: alvo selecionado (objeto) ou o próprio jogador ──
   let M;
-  if (lvl.getObjMatrix && state.objects && state.objects.length) {
-    M = lvl.getObjMatrix(state);
+  const t = selTarget();
+  if (t && t.kind === 'player') {
+    M = [[player.scale,0,0],[0,player.scale,0],[0,0,1]];
+  } else if (t && t.kind === 'obj' && ph.getObjMatrix) {
+    M = ph.getObjMatrix(state);
   } else {
     M = getPlayerMatrix();
   }
   if (M) updateMatrix(M);
   updateVectors();
+  syncSliders();
 
   // ── DRAW ──
   ctx.clearRect(0,0,W,H);
   drawBackground();
-  lvl.draw(state);
-  drawStickFigure(player.x, player.y, player.facing, player.walkFrame, player.vx, player.vy);
+  ph.draw(state);
+  drawStickFigure(player.x, player.y, player.facing, player.walkFrame, player.vx, player.vy, player.scale);
+  drawParticles();
 
-  // Level 1: show translation vector arrow
-  if (currentLevel === 0 && (Math.abs(player.vx)>5 || Math.abs(player.vy)>5)) {
+  // Tela de pause
+  if (paused) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(13,17,23,0.72)';
+    ctx.fillRect(0,0,W,H);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 32px "Pixelify Sans", monospace';
+    ctx.fillStyle = '#cdd9e5';
+    ctx.fillText('⏸ Pausado', W/2, H/2 - 10);
+    ctx.font = '13px "DM Mono", monospace';
+    ctx.fillStyle = '#546e7a';
+    ctx.fillText('Esc continua · R reinicia a fase', W/2, H/2 + 24);
+    ctx.restore();
+  }
+
+  // Mundo 1: seta do vetor de translação
+  if (cur.w === 0 && (Math.abs(player.vx)>5 || Math.abs(player.vy)>5)) {
     ctx.save();
     ctx.strokeStyle = 'rgba(88,224,106,0.6)';
     ctx.lineWidth = 2;
@@ -1066,7 +1569,12 @@ function loop(ts) {
 // ═══════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════
-initLevel(0);
+(function initFromProgress() {
+  // Retoma no primeiro mundo ainda não terminado
+  let w = 0;
+  while (w + 1 < worlds.length && progress[w] >= worlds[w].phases.length) w++;
+  initPhase(w, Math.min(progress[w], worlds[w].phases.length - 1));
+})();
 requestAnimationFrame(ts => { last = ts; loop(ts); });
 </script>
 </body>
